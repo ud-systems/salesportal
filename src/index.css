@@ -1,0 +1,152 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=Inter+Tight:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 90 33% 96%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+
+    --primary: 100 42% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 100 50% 50%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 17% 98%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 100 50% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 100 15% 88%;
+    --input: 100 15% 88%;
+    --ring: 100 42% 45%;
+
+    --radius: 1rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 30%;
+    --sidebar-primary: 100 42% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 90 33% 94%;
+    --sidebar-accent-foreground: 0 0% 10%;
+    --sidebar-border: 100 15% 92%;
+    --sidebar-ring: 100 42% 45%;
+
+    /* Custom tokens */
+    --success: 100 42% 45%;
+    --warning: 40 96% 60%;
+    --info: 210 80% 55%;
+
+    --font-heading: 'Bricolage Grotesque', sans-serif;
+    --font-body: 'Inter Tight', sans-serif;
+
+    --shadow-card: 0 1px 3px 0 hsl(0 0% 0% / 0.04), 0 1px 2px -1px hsl(0 0% 0% / 0.04);
+    --shadow-card-hover: 0 10px 30px -8px hsl(100 42% 45% / 0.12), 0 4px 6px -4px hsl(0 0% 0% / 0.05);
+    --shadow-float: 0 20px 40px -12px hsl(0 0% 0% / 0.1);
+  }
+
+  .dark {
+    --background: 0 0% 7%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 100 42% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 100 50% 50%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 95%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 100 42% 45%;
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 80%;
+    --sidebar-primary: 100 42% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 0 0% 15%;
+    --sidebar-ring: 100 42% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer utilities {
+  @keyframes shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+
+  .font-body {
+    font-family: var(--font-body);
+  }
+
+  .card-float {
+    @apply bg-card rounded-2xl border shadow-sm transition-all duration-200;
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-float:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  .card-kpi {
+    @apply bg-card rounded-2xl border p-5 transition-all duration-200;
+    box-shadow: var(--shadow-card);
+  }
+
+  .card-kpi:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-2px);
+  }
+
+  .tap-scale {
+    @apply transition-transform duration-150 active:scale-[0.96];
+  }
+
+  .gradient-primary {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary)));
+  }
+
+  .gradient-bg {
+    background: linear-gradient(180deg, hsl(var(--background)), hsl(90 33% 93%));
+  }
+}

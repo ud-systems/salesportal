@@ -1,0 +1,17 @@
+# Netlify configuration — Vite + React (SPA)
+# https://docs.netlify.com/configure-builds/file-based-configuration/
+# Development ownership: Ian Katana
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Client-side routing: serve index.html for all non-file paths so React Router
+# handles /dashboard, /login, deep links, and refreshes on nested routes.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

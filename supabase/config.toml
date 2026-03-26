@@ -1,0 +1,13 @@
+project_id = "xbmpndatdanjewhwxzxr"
+
+# Gateway JWT verification can return 401 before our handler runs (browser then shows a CORS error).
+# Deploy with: supabase functions deploy <name> --no-verify-jwt --project-ref <ref>
+# Auth + admin are enforced inside each function via requireAdmin() + auth.getUser().
+[functions.shopify-test]
+verify_jwt = false
+
+[functions.shopify-sync]
+verify_jwt = false
+
+[functions.shopify-webhook]
+verify_jwt = false
