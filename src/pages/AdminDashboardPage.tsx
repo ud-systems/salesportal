@@ -1,4 +1,4 @@
-import { DollarSign, ShoppingCart, Users, PackageX } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import {
   useCustomers,
@@ -10,14 +10,18 @@ import {
   useUnfulfilledOrdersCount,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { CardGridSkeleton, HeaderSkeleton, TableSkeleton } from "@/components/PageSkeletons";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
+import { supabase } from "@/integrations/supabase/client";
 const COLORS = ["hsl(100, 42%, 45%)", "hsl(100, 50%, 50%)", "hsl(40, 96%, 60%)", "hsl(210, 80%, 55%)", "hsl(0, 70%, 55%)"];
 
 export default function AdminDashboardPage() {
+  const LICENSE_BANNER_DISMISS_UNTIL_KEY = "datapulse_license_banner_dismiss_until_ms";
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
   const year = new Date().getUTCFullYear();
   const { data: customers, isLoading: loadingCustomers } = useCustomers();
   const { data: totalOrders = 0, isLoading: loadingOrdersCount } = useOrdersCount();
@@ -26,6 +30,40 @@ export default function AdminDashboardPage() {
   const { data: unfulfilledOrders = 0, isLoading: loadingUnfulfilled } = useUnfulfilledOrdersCount();
   const { data: recentOrders = [], isLoading: loadingRecentOrders } = useRecentOrders(10);
   const { data: revenueData = [], isLoading: loadingRevenue } = useRevenueByMonthForYear(year);
+  const [licenseCode, setLicenseCode] = useState("");
+  const [licenseExpiresAt, setLicenseExpiresAt] = useState("");
+  const [licenseMode, setLicenseMode] = useState<"renewable" | "lifetime">("renewable");
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [dismissedUntilMs, setDismissedUntilMs] = useState(0);
+
+  useEffect(() => {
+    const loadLicenseSettings = async () => {
+      const { data } = await (supabase as any)
+        .from("app_settings")
+        .select("key, value")
+        .in("key", ["datapulse_access_code", "datapulse_access_expires_at", "datapulse_license_mode"]);
+      const rows = data || [];
+      setLicenseCode((rows.find((r: any) => r.key === "datapulse_access_code")?.value || "").trim());
+      setLicenseExpiresAt((rows.find((r: any) => r.key === "datapulse_access_expires_at")?.value || "").trim());
+      setLicenseMode(
+        (rows.find((r: any) => r.key === "datapulse_license_mode")?.value || "renewable").trim() === "lifetime"
+          ? "lifetime"
+          : "renewable",
+      );
+    };
+    void loadLicenseSettings();
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(LICENSE_BANNER_DISMISS_UNTIL_KEY);
+    const parsed = Number(raw || "0");
+    setDismissedUntilMs(Number.isFinite(parsed) ? parsed : 0);
+  }, []);
 
   const salesBySP = useMemo(() => {
     const map: Record<string, number> = {};
@@ -37,6 +75,27 @@ export default function AdminDashboardPage() {
     return Object.entries(map).map(([name, revenue]) => ({ name: name.split(" ")[0], fullName: name, revenue }));
   }, [customers]);
 
+  const expiryMs = licenseExpiresAt ? new Date(licenseExpiresAt).getTime() : 0;
+  const hasLicense = Boolean(licenseCode);
+  const isLifetime = licenseMode === "lifetime";
+  const licenseActive = hasLicense && (isLifetime || expiryMs > nowMs);
+  const licenseExpired = hasLicense && !isLifetime && expiryMs > 0 && expiryMs <= nowMs;
+  const remainingMs = Math.max(0, expiryMs - nowMs);
+  const showWarningWindow = licenseActive && !isLifetime && remainingMs <= SEVEN_DAYS_MS;
+  const isTemporarilyDismissed = dismissedUntilMs > nowMs;
+  const showLicenseBanner = licenseExpired || (showWarningWindow && !isTemporarilyDismissed);
+  const days = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((remainingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const mins = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+  const secs = Math.floor((remainingMs % (1000 * 60)) / 1000);
+  const countdown = `${days}d ${String(hours).padStart(2, "0")}h ${String(mins).padStart(2, "0")}m ${String(secs).padStart(2, "0")}s`;
+  const handleDismissBanner = () => {
+    if (licenseExpired) return;
+    const next = Date.now() + ONE_HOUR_MS;
+    setDismissedUntilMs(next);
+    localStorage.setItem(LICENSE_BANNER_DISMISS_UNTIL_KEY, String(next));
+  };
+
   if (loadingOrdersCount || loadingCustomersCount || loadingRevenueTotal || loadingUnfulfilled || loadingRecentOrders || loadingRevenue) {
     return <div className="space-y-6 max-w-[1200px]"><HeaderSkeleton /><CardGridSkeleton cards={4} /><TableSkeleton rows={3} cols={4} /></div>;
   }
@@ -47,6 +106,67 @@ export default function AdminDashboardPage() {
         <h1 className="text-2xl lg:text-3xl font-heading font-bold text-foreground">Admin Dashboard</h1>
         <p className="text-muted-foreground font-body text-sm mt-1">Organization-wide overview</p>
       </div>
+
+      {showLicenseBanner && (
+        <div
+          className={`rounded-xl border p-4 opacity-0 animate-fade-in ${
+            licenseExpired ? "border-destructive/40 bg-destructive/10" : "border-amber-500/30 bg-amber-500/10"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2">
+              {licenseExpired ? (
+                <AlertTriangle className="h-5 w-5 text-destructive mt-0.5" />
+              ) : (
+                <Clock className="h-5 w-5 text-amber-600 mt-0.5" />
+              )}
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {licenseExpired ? "License Expired - Sync Locked" : "License Expires Soon"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {licenseExpired
+                    ? "Renew in DataPulseFlow guest checkout, then enter the new code in Settings to unlock sync."
+                    : "Your license has 7 days or less remaining. Renew in time to avoid sync interruption."}
+                </p>
+                <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                  <p className="text-xs text-muted-foreground font-mono">{licenseCode || "No code saved"}</p>
+                  <p className={`text-xs font-medium flex items-center gap-1 ${licenseExpired ? "text-destructive" : "text-amber-700 dark:text-amber-400"}`}>
+                    <Clock className="h-3.5 w-3.5" />
+                    {licenseExpired ? "Expired" : countdown}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {licenseExpiresAt ? `Expires: ${new Date(licenseExpiresAt).toLocaleString()}` : "No expiry saved"}
+                  </p>
+                </div>
+              </div>
+            </div>
+            {!licenseExpired && (
+              <button
+                type="button"
+                onClick={handleDismissBanner}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-background/70 text-muted-foreground hover:text-foreground transition-colors"
+                title="Dismiss for 1 hour"
+                aria-label="Dismiss for 1 hour"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isLifetime && hasLicense && (
+        <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-4 opacity-0 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-green-600" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Enterprise Lifetime License Active</p>
+              <p className="text-xs text-muted-foreground font-mono">{licenseCode}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <KpiCard title="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} icon={DollarSign} delay={50} />

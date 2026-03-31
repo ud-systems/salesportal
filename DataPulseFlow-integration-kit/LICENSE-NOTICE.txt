@@ -1,0 +1,11 @@
+DataPulseFlow Integration Kit
+DataPulseFlow.com — https://datapulseflow.com
+
+Copyright (c) DataPulseFlow. All rights reserved.
+
+This package is provided under the license terms agreed between DataPulseFlow and
+the licensee. Redistribution, resale, or public distribution of this kit outside
+those terms is prohibited unless expressly permitted in writing.
+
+Shopify is a trademark of Shopify Inc. This kit is not affiliated with or
+endorsed by Shopify Inc.

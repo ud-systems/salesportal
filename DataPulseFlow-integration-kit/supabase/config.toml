@@ -1,0 +1,17 @@
+# DataPulseFlow — Supabase Edge Functions config (template)
+# DataPulseFlow.com — https://datapulseflow.com
+# Replace YOUR_SUPABASE_PROJECT_REF in Dashboard link only; project_id here is optional for local CLI.
+
+project_id = "YOUR_SUPABASE_PROJECT_REF"
+
+# Deploy with: supabase functions deploy <name> --no-verify-jwt --project-ref <ref>
+# Auth is enforced inside shopify-test and shopify-sync via requireAdmin().
+# shopify-webhook is called by Shopify (no user JWT).
+[functions.shopify-test]
+verify_jwt = false
+
+[functions.shopify-sync]
+verify_jwt = false
+
+[functions.shopify-webhook]
+verify_jwt = false

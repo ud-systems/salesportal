@@ -104,44 +104,6 @@ async function buildShopifyQuery(
   return json;
 }
 
-async function assertDataPulseLicenseActive(
-  supabase: ReturnType<typeof createClient>,
-): Promise<void> {
-  const { data: settings, error } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["datapulse_access_code", "datapulse_access_expires_at", "datapulse_license_mode", "datapulse_validation_url"]);
-  if (error) throw new Error(`Failed to read license settings: ${error.message}`);
-
-  const get = (key: string) => (settings || []).find((s: { key: string; value: string }) => s.key === key)?.value?.trim() || "";
-  const code = get("datapulse_access_code").toUpperCase();
-  const expiresAt = get("datapulse_access_expires_at");
-  const mode = get("datapulse_license_mode");
-  const validationUrl = get("datapulse_validation_url") || "https://clitxvzecgtdtracpbnt.supabase.co/functions/v1/validate-access-code";
-
-  if (!code) throw new Error("Sync locked: missing DataPulse access code.");
-  if (mode !== "lifetime") {
-    const expiresMs = new Date(expiresAt).getTime();
-    if (!expiresAt || Number.isNaN(expiresMs) || expiresMs <= Date.now()) {
-      throw new Error("Sync locked: DataPulse access code expired.");
-    }
-  }
-
-  const res = await fetch(validationUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-  });
-  const payload = await res.json().catch(() => ({} as { valid?: boolean; lifetime?: boolean; expires_at?: string; error?: string }));
-  if (!res.ok || !payload?.valid) {
-    throw new Error(payload?.error || "Sync locked: DataPulse code invalid.");
-  }
-  const isLifetime = payload?.lifetime === true || mode === "lifetime";
-  if (!isLifetime && payload.expires_at && new Date(payload.expires_at).getTime() <= Date.now()) {
-    throw new Error("Sync locked: DataPulse access code expired.");
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") {
@@ -155,7 +117,6 @@ Deno.serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    await assertDataPulseLicenseActive(supabase);
 
     // Config from settings/env
     const { data: settings } = await supabase

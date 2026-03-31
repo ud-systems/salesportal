@@ -619,7 +619,27 @@ export function usePurchaseOrdersPaginated(params: PurchaseOrdersQueryParams) {
 
 export type ShopifySyncModule = "customers" | "orders" | "products" | "collections" | "purchase_orders";
 
+async function assertLicenseActive() {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", ["datapulse_access_code", "datapulse_access_expires_at", "datapulse_license_mode"]);
+  if (error) throw error;
+  const rows = data ?? [];
+  const code = rows.find((r) => r.key === "datapulse_access_code")?.value?.trim();
+  const expiresAt = rows.find((r) => r.key === "datapulse_access_expires_at")?.value?.trim();
+  const mode = rows.find((r) => r.key === "datapulse_license_mode")?.value?.trim();
+  if (!code) {
+    throw new Error("Sync locked: add and validate a DataPulse access code in Settings.");
+  }
+  if (mode === "lifetime") return;
+  if (!expiresAt || Number.isNaN(new Date(expiresAt).getTime()) || new Date(expiresAt).getTime() <= Date.now()) {
+    throw new Error("Sync locked: DataPulse access code expired. Validate a new code in Settings.");
+  }
+}
+
 export async function triggerSync(module?: ShopifySyncModule) {
+  await assertLicenseActive();
   const accessToken = await getAccessTokenForEdgeFunctions();
   if (!accessToken) {
     throw new Error("Your session expired. Please sign in again.");

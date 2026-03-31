@@ -23,6 +23,10 @@ const SETTINGS_KEYS = [
   "shopify_client_id",
   "shopify_client_secret",
   "shopify_webhook_secret",
+  "datapulse_access_code",
+  "datapulse_access_expires_at",
+  "datapulse_license_mode",
+  "datapulse_validation_url",
   "sync_frequency",
   "low_stock_threshold",
   "notify_sync_complete",
@@ -36,7 +40,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [validatingCode, setValidatingCode] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<"idle" | "success" | "error">("idle");
+  const [licenseStatus, setLicenseStatus] = useState<"idle" | "valid" | "invalid">("idle");
 
   useEffect(() => {
     loadSettings();
@@ -56,6 +62,10 @@ export default function SettingsPage() {
       notify_sync_error: "true",
       notify_low_stock: "true",
       shopify_webhook_secret: "",
+      datapulse_access_code: "",
+      datapulse_access_expires_at: "",
+      datapulse_license_mode: "renewable",
+      datapulse_validation_url: "https://clitxvzecgtdtracpbnt.supabase.co/functions/v1/validate-access-code",
     };
     if (data) {
       for (const row of data as { key: string; value: string }[]) {
@@ -158,6 +168,68 @@ export default function SettingsPage() {
       toast.error("Connection test failed");
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function handleValidateLicenseCode() {
+    const code = (settings.datapulse_access_code || "").trim().toUpperCase();
+    const validationUrl = (settings.datapulse_validation_url || "").trim();
+    if (!code) {
+      setLicenseStatus("invalid");
+      toast.error("Enter your DataPulse access code first.");
+      return;
+    }
+    if (!validationUrl) {
+      setLicenseStatus("invalid");
+      toast.error("Validation URL is missing.");
+      return;
+    }
+
+    setValidatingCode(true);
+    try {
+      const res = await fetch(validationUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const payload = await res.json().catch(() => ({} as any));
+      if (!res.ok || !payload?.valid) {
+        setLicenseStatus("invalid");
+        toast.error(payload?.error || "Code is invalid or expired.");
+        return;
+      }
+
+      const expiresAt = String(payload.expires_at || "");
+      const licenseMode = payload?.lifetime ? "lifetime" : "renewable";
+      setSettings((prev) => ({
+        ...prev,
+        datapulse_access_code: code,
+        datapulse_access_expires_at: expiresAt,
+        datapulse_license_mode: licenseMode,
+      }));
+
+      const nowIso = new Date().toISOString();
+      const saveRows = [
+        { key: "datapulse_access_code", value: code, updated_at: nowIso },
+        { key: "datapulse_access_expires_at", value: expiresAt, updated_at: nowIso },
+        { key: "datapulse_license_mode", value: licenseMode, updated_at: nowIso },
+      ];
+      const { error } = await (supabase as any)
+        .from("app_settings")
+        .upsert(saveRows, { onConflict: "key" });
+      if (error) throw error;
+
+      setLicenseStatus("valid");
+      toast.success(
+        licenseMode === "lifetime"
+          ? "Enterprise lifetime license validated. Sync remains unlocked."
+          : `Code validated. License active until ${new Date(expiresAt).toLocaleString()}.`,
+      );
+    } catch (error: any) {
+      setLicenseStatus("invalid");
+      toast.error(error?.message || "Failed to validate license code.");
+    } finally {
+      setValidatingCode(false);
     }
   }
 
@@ -282,6 +354,68 @@ export default function SettingsPage() {
               Test Connection
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Sync Frequency */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-accent/50 flex items-center justify-center">
+              <CheckCircle2 className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">DataPulse License Code</CardTitle>
+              <CardDescription>
+                Growth/Pro codes are renewable every 30 days. Enterprise code validates as lifetime.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Access Code</label>
+            <Input
+              placeholder="DPF-XXXX-XXXX-XXXX"
+              value={settings.datapulse_access_code || ""}
+              onChange={(e) => {
+                setLicenseStatus("idle");
+                updateSetting("datapulse_access_code", e.target.value.toUpperCase());
+              }}
+              className="font-mono"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Validation Endpoint</label>
+            <Input
+              placeholder="https://.../functions/v1/validate-access-code"
+              value={settings.datapulse_validation_url || ""}
+              onChange={(e) => updateSetting("datapulse_validation_url", e.target.value)}
+            />
+          </div>
+          {settings.datapulse_access_expires_at && (
+            <p className="text-xs text-muted-foreground">
+              {settings.datapulse_license_mode === "lifetime"
+                ? "License mode: Lifetime"
+                : `Active until: ${new Date(settings.datapulse_access_expires_at).toLocaleString()}`}
+            </p>
+          )}
+          {licenseStatus === "valid" && (
+            <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-950/30 dark:text-green-400 rounded-lg p-3">
+              <CheckCircle2 className="h-4 w-4" />
+              License code is valid and sync can run.
+            </div>
+          )}
+          {licenseStatus === "invalid" && (
+            <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+              <AlertCircle className="h-4 w-4" />
+              Invalid or expired code. Sync will remain locked.
+            </div>
+          )}
+          <Button onClick={handleValidateLicenseCode} variant="outline" disabled={validatingCode}>
+            {validatingCode ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Validate Code
+          </Button>
         </CardContent>
       </Card>
 

@@ -22,46 +22,6 @@ function isAuthorizedInternalCron(req: Request): boolean {
   return timingSafeEqual(expected, provided);
 }
 
-async function assertDataPulseLicenseActive(
-  supabase: ReturnType<typeof createClient>,
-): Promise<{ code: string; expiresAt: string }> {
-  const { data: settings, error } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["datapulse_access_code", "datapulse_access_expires_at", "datapulse_license_mode", "datapulse_validation_url"]);
-  if (error) throw new Error(`Failed to read license settings: ${error.message}`);
-
-  const get = (key: string) => (settings || []).find((s: { key: string; value: string }) => s.key === key)?.value?.trim() || "";
-  const code = get("datapulse_access_code").toUpperCase();
-  const expiresAt = get("datapulse_access_expires_at");
-  const mode = get("datapulse_license_mode");
-  const validationUrl = get("datapulse_validation_url") || "https://clitxvzecgtdtracpbnt.supabase.co/functions/v1/validate-access-code";
-
-  if (!code) throw new Error("Sync locked: missing DataPulse access code in Settings.");
-  if (mode !== "lifetime") {
-    const expiresMs = new Date(expiresAt).getTime();
-    if (!expiresAt || Number.isNaN(expiresMs) || expiresMs <= Date.now()) {
-      throw new Error("Sync locked: DataPulse access code expired. Add and validate a new code.");
-    }
-  }
-
-  const res = await fetch(validationUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-  });
-  const payload = await res.json().catch(() => ({} as { valid?: boolean; lifetime?: boolean; expires_at?: string; error?: string }));
-  if (!res.ok || !payload?.valid) {
-    throw new Error(payload?.error || "Sync locked: DataPulse code is invalid or expired.");
-  }
-  const isLifetime = payload?.lifetime === true || mode === "lifetime";
-  if (!isLifetime && payload.expires_at && new Date(payload.expires_at).getTime() <= Date.now()) {
-    throw new Error("Sync locked: DataPulse access code expired. Add and validate a new code.");
-  }
-
-  return { code, expiresAt: payload.expires_at || expiresAt };
-}
-
 function normalizeSalespersonLabel(s: string | null | undefined): string {
   return (s || "")
     .trim()
@@ -154,7 +114,6 @@ Deno.serve(async (req) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  await assertDataPulseLicenseActive(supabase);
   const requestBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
   const requestedModule = typeof requestBody?.module === "string" ? requestBody.module : null;
   const allowedModules = new Set(["customers", "orders", "products", "collections", "purchase_orders"]);
