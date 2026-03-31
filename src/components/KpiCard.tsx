@@ -1,10 +1,11 @@
 import { cn } from "@/lib/utils";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface KpiCardProps {
   title: string;
-  value: string;
+  value: ReactNode;
   change?: number;
   icon: LucideIcon;
   delay?: number;

@@ -8,7 +8,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
-import { HeaderSkeleton, SearchRowSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchParams } from "react-router-dom";
 
 export default function OrdersPage() {
@@ -53,8 +53,6 @@ export default function OrdersPage() {
 
   const statuses = ["all", "paid", "pending", "refunded", "partially_paid"];
   const fulfillmentStatuses = ["all", "fulfilled", "partial", "unfulfilled", "on_hold"];
-
-  if (isLoading) return <div className="space-y-5 max-w-[1200px]"><HeaderSkeleton /><SearchRowSkeleton /><TableSkeleton rows={7} cols={6} /></div>;
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -157,7 +155,17 @@ export default function OrdersPage() {
         </div>
       </BottomSheet>
 
-      {orders.length === 0 ? (
+      {isLoading ? (
+        <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
+      ) : orders.length === 0 ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No orders found. Run a Shopify sync first.</p></div>
       ) : (
         <>

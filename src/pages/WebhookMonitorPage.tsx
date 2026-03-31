@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useWebhookEvents } from "@/hooks/use-shopify-data";
-import { HeaderSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Filter } from "lucide-react";
 import { BottomSheet } from "@/components/BottomSheet";
@@ -109,7 +109,12 @@ export default function WebhookMonitorPage() {
       </BottomSheet>
 
       {isLoading ? (
-        <div className="space-y-5"><HeaderSkeleton /><TableSkeleton rows={8} cols={6} /></div>
+        <div className="card-float p-5 space-y-3">
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+        </div>
       ) : !rows?.length ? (
         <div className="card-float p-10 text-center">
           <p className="text-muted-foreground font-body">No webhook events found for current filters.</p>

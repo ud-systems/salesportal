@@ -11,7 +11,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
-import { HeaderSkeleton, SearchRowSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function CustomersPage() {
@@ -61,8 +61,6 @@ export default function CustomersPage() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
-
-  if (isLoading) return <div className="space-y-5 max-w-[1200px]"><HeaderSkeleton /><SearchRowSkeleton /><TableSkeleton rows={7} cols={isAdmin ? 6 : 5} /></div>;
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -203,7 +201,17 @@ export default function CustomersPage() {
         </div>
       </BottomSheet>
 
-      {customers.length === 0 ? (
+      {isLoading ? (
+        <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
+      ) : customers.length === 0 ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No customers found. Run a Shopify sync first.</p></div>
       ) : (
         <>

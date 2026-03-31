@@ -149,4 +149,13 @@
   .gradient-bg {
     background: linear-gradient(180deg, hsl(var(--background)), hsl(90 33% 93%));
   }
+
+  .sidebar-scroll-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .sidebar-scroll-hide::-webkit-scrollbar {
+    display: none;
+  }
 }

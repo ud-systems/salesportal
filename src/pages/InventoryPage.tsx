@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
-import { HeaderSkeleton, SearchRowSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function InventoryPage() {
   const [search, setSearch] = useState("");
@@ -55,8 +55,6 @@ export default function InventoryPage() {
     }
     return map;
   }, [filtered]);
-
-  if (isLoading) return <div className="space-y-5 max-w-[1200px]"><HeaderSkeleton /><SearchRowSkeleton /><TableSkeleton rows={6} cols={4} /></div>;
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -151,7 +149,13 @@ export default function InventoryPage() {
         </div>
       </BottomSheet>
 
-      {Object.keys(grouped).length === 0 ? (
+      {isLoading ? (
+        <div className="space-y-3">
+          <div className="card-float p-5"><Skeleton className="h-24 w-full rounded-xl" /></div>
+          <div className="card-float p-5"><Skeleton className="h-24 w-full rounded-xl" /></div>
+          <div className="card-float p-5"><Skeleton className="h-24 w-full rounded-xl" /></div>
+        </div>
+      ) : Object.keys(grouped).length === 0 ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No inventory data. Run a Shopify sync first.</p></div>
       ) : (
         <>

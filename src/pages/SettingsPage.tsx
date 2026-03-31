@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Settings, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle, RefreshCw, Bell } from "lucide-react";
-import { HeaderSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   normalizeShopifyAdminTokenClient,
   normalizeShopifyDomainClient,
@@ -233,10 +233,6 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) {
-    return <div className="space-y-6"><HeaderSkeleton /><TableSkeleton rows={10} cols={2} /></div>;
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -258,6 +254,12 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
+          {loading && (
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+          )}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Store Domain</label>
             <Input
@@ -373,6 +375,7 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
+          {loading && <Skeleton className="h-10 w-full rounded-lg" />}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Access Code</label>
             <Input
@@ -433,6 +436,7 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
+          {loading && <Skeleton className="h-10 w-56 rounded-lg" />}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Auto-Sync Schedule</label>
             <Select
@@ -483,6 +487,7 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
+          {loading && <Skeleton className="h-10 w-full rounded-lg" />}
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-foreground">Sync completed</p>

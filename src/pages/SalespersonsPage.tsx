@@ -1,7 +1,7 @@
 import { useCustomers } from "@/hooks/use-shopify-data";
 import { Users, DollarSign } from "lucide-react";
 import { useMemo } from "react";
-import { CardGridSkeleton, HeaderSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SalespersonsPage() {
   const { data: customers, isLoading } = useCustomers();
@@ -19,8 +19,6 @@ export default function SalespersonsPage() {
     return Object.values(map).sort((a, b) => b.revenue - a.revenue);
   }, [customers]);
 
-  if (isLoading) return <div className="space-y-5 max-w-[1200px]"><HeaderSkeleton /><CardGridSkeleton cards={4} /></div>;
-
   return (
     <div className="space-y-5 max-w-[1200px]">
       <div className="opacity-0 animate-fade-in">
@@ -28,7 +26,12 @@ export default function SalespersonsPage() {
         <p className="text-muted-foreground font-body text-sm mt-1">Sales team performance</p>
       </div>
 
-      {salespersons.length === 0 ? (
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="card-float p-5"><Skeleton className="h-32 w-full rounded-xl" /></div>
+          <div className="card-float p-5"><Skeleton className="h-32 w-full rounded-xl" /></div>
+        </div>
+      ) : salespersons.length === 0 ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No salesperson data. Sync customers from Shopify first.</p></div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

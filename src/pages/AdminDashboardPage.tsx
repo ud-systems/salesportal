@@ -11,11 +11,11 @@ import {
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { useMemo, useEffect, useState } from "react";
-import { CardGridSkeleton, HeaderSkeleton, TableSkeleton } from "@/components/PageSkeletons";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { supabase } from "@/integrations/supabase/client";
+import { Skeleton } from "@/components/ui/skeleton";
 const COLORS = ["hsl(100, 42%, 45%)", "hsl(100, 50%, 50%)", "hsl(40, 96%, 60%)", "hsl(210, 80%, 55%)", "hsl(0, 70%, 55%)"];
 
 export default function AdminDashboardPage() {
@@ -96,10 +96,6 @@ export default function AdminDashboardPage() {
     localStorage.setItem(LICENSE_BANNER_DISMISS_UNTIL_KEY, String(next));
   };
 
-  if (loadingOrdersCount || loadingCustomersCount || loadingRevenueTotal || loadingUnfulfilled || loadingRecentOrders || loadingRevenue) {
-    return <div className="space-y-6 max-w-[1200px]"><HeaderSkeleton /><CardGridSkeleton cards={4} /><TableSkeleton rows={3} cols={4} /></div>;
-  }
-
   return (
     <div className="space-y-6 max-w-[1200px]">
       <div className="opacity-0 animate-fade-in">
@@ -169,26 +165,50 @@ export default function AdminDashboardPage() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} icon={DollarSign} delay={50} />
-        <KpiCard title="Total Orders" value={totalOrders.toString()} icon={ShoppingCart} delay={100} />
-        <KpiCard title="Total Customers" value={totalCustomers.toString()} icon={Users} delay={150} />
+        <KpiCard
+          title="Total Revenue"
+          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : `$${totalRevenue.toLocaleString()}`}
+          icon={DollarSign}
+          delay={50}
+        />
+        <KpiCard
+          title="Total Orders"
+          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
+          icon={ShoppingCart}
+          delay={100}
+        />
+        <KpiCard
+          title="Total Customers"
+          value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
+          icon={Users}
+          delay={150}
+        />
         <Link to="/orders?fulfillment=unfulfilled" className="block">
-          <KpiCard title="Unfulfilled Orders" value={unfulfilledOrders.toString()} icon={PackageX} delay={200} />
+          <KpiCard
+            title="Unfulfilled Orders"
+            value={loadingUnfulfilled ? <Skeleton className="h-8 w-16 rounded-md" /> : unfulfilledOrders.toString()}
+            icon={PackageX}
+            delay={200}
+          />
         </Link>
       </div>
 
       <div className={`grid grid-cols-1 gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
         <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <h3 className="font-heading font-semibold text-foreground mb-4">Revenue by Month ({revenueData[0]?.year || year})</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={revenueData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }} barCategoryGap="22%">
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12, fontFamily: 'Inter Tight' }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
-              <YAxis width={40} tick={{ fontSize: 12, fontFamily: 'Inter Tight' }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `$${Math.round(v / 1000)}k`} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid hsl(var(--border))', fontFamily: 'Inter Tight', fontSize: 13 }} formatter={(value: number) => [`$${value.toLocaleString()}`, "Revenue"]} />
-              <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {loadingRevenue ? (
+            <Skeleton className="h-[220px] w-full rounded-xl" />
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={revenueData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }} barCategoryGap="22%">
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12, fontFamily: 'Inter Tight' }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
+                <YAxis width={40} tick={{ fontSize: 12, fontFamily: 'Inter Tight' }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `$${Math.round(v / 1000)}k`} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid hsl(var(--border))', fontFamily: 'Inter Tight', fontSize: 13 }} formatter={(value: number) => [`$${value.toLocaleString()}`, "Revenue"]} />
+                <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
         {!loadingCustomers && salesBySP.length > 0 && (
           <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
@@ -263,7 +283,13 @@ export default function AdminDashboardPage() {
             <Link to="/orders">View All</Link>
           </Button>
         </div>
-        {recentOrders.length === 0 ? (
+        {loadingRecentOrders ? (
+          <div className="space-y-3 py-1">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        ) : recentOrders.length === 0 ? (
           <p className="text-muted-foreground font-body text-sm text-center py-6">No orders yet. Run a Shopify sync to pull data.</p>
         ) : (
           <>

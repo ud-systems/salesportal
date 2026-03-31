@@ -1,6 +1,6 @@
 import { LayoutDashboard, Users, ShoppingCart, Package, Menu, X, LogOut, UserCheck, RefreshCw, Boxes, Settings, FolderTree, ClipboardList, UserCircle, RadioTower } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -33,9 +33,31 @@ const adminNav = [
 
 export function AppSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [navScrollProgress, setNavScrollProgress] = useState(0);
+  const [hasNavOverflow, setHasNavOverflow] = useState(false);
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const navItems = isAdmin ? adminNav : salespersonNav;
+  const navRef = useRef<HTMLElement | null>(null);
+
+  const updateNavScrollState = useCallback(() => {
+    const navElement = navRef.current;
+    if (!navElement) return;
+
+    const maxScroll = navElement.scrollHeight - navElement.clientHeight;
+    const isOverflowing = maxScroll > 0;
+    setHasNavOverflow(isOverflowing);
+    setNavScrollProgress(isOverflowing ? (navElement.scrollTop / maxScroll) * 100 : 0);
+  }, []);
+
+  useEffect(() => {
+    updateNavScrollState();
+  }, [updateNavScrollState, navItems.length]);
+
+  useEffect(() => {
+    window.addEventListener("resize", updateNavScrollState);
+    return () => window.removeEventListener("resize", updateNavScrollState);
+  }, [updateNavScrollState]);
 
   const handleLogout = async () => {
     await logout();
@@ -86,21 +108,35 @@ export function AppSidebar() {
           </button>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.url}
-              to={item.url}
-              end
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-body font-medium text-muted-foreground hover:bg-muted transition-colors tap-scale"
-              activeClassName="bg-primary text-primary-foreground hover:bg-primary"
-              onClick={() => setMobileOpen(false)}
-            >
-              <item.icon className="h-[18px] w-[18px]" />
-              <span>{item.title}</span>
-            </NavLink>
-          ))}
-        </nav>
+        <div className="relative flex-1">
+          {hasNavOverflow && (
+            <div className="pointer-events-none absolute left-0 right-0 top-0 z-10 h-1 bg-muted/70">
+              <div
+                className="h-full rounded-r-full bg-primary transition-[width] duration-150 ease-out"
+                style={{ width: `${navScrollProgress}%` }}
+              />
+            </div>
+          )}
+          <nav
+            ref={navRef}
+            className="sidebar-scroll-hide h-full px-3 py-4 space-y-1 overflow-y-auto"
+            onScroll={updateNavScrollState}
+          >
+            {navItems.map((item) => (
+              <NavLink
+                key={item.url}
+                to={item.url}
+                end
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-body font-medium text-muted-foreground hover:bg-muted transition-colors tap-scale"
+                activeClassName="bg-primary text-primary-foreground hover:bg-primary"
+                onClick={() => setMobileOpen(false)}
+              >
+                <item.icon className="h-[18px] w-[18px]" />
+                <span>{item.title}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </div>
 
         <div className="p-3 border-t">
           <div className="flex items-center gap-3 px-3 py-2">

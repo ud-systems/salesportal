@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
-import { CardGridSkeleton, HeaderSkeleton, SearchRowSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export default function ProductsPage() {
@@ -69,8 +69,6 @@ export default function ProductsPage() {
     if (stock <= 10) return "bg-warning/10 text-warning";
     return "bg-primary/10 text-primary";
   };
-
-  if (isLoading) return <div className="space-y-5 max-w-[1200px]"><HeaderSkeleton /><SearchRowSkeleton /><CardGridSkeleton cards={6} /></div>;
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -172,7 +170,17 @@ export default function ProductsPage() {
         </div>
       </BottomSheet>
 
-      {!filtered.length ? (
+      {isLoading ? (
+        <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "80ms" }}>
+          <div className="space-y-3">
+            <Skeleton className="h-12 w-full rounded-lg" />
+            <Skeleton className="h-12 w-full rounded-lg" />
+            <Skeleton className="h-12 w-full rounded-lg" />
+            <Skeleton className="h-12 w-full rounded-lg" />
+            <Skeleton className="h-12 w-full rounded-lg" />
+          </div>
+        </div>
+      ) : !filtered.length ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No products yet. Run a Shopify sync first.</p></div>
       ) : (
         <>

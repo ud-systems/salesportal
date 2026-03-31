@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { HeaderSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BottomSheet } from "@/components/BottomSheet";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -249,7 +249,12 @@ export default function SyncLogsPage() {
       </BottomSheet>
 
       {isLoading ? (
-        <div className="space-y-5"><HeaderSkeleton /><TableSkeleton rows={8} cols={6} /></div>
+        <div className="card-float p-5 space-y-3">
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+          <Skeleton className="h-10 w-full rounded-lg" />
+        </div>
       ) : !logs?.length ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in">
           <p className="text-muted-foreground font-body">No sync logs yet. Click "Sync Now" to pull data from Shopify.</p>

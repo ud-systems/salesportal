@@ -12,9 +12,9 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { useMemo } from "react";
-import { CardGridSkeleton, HeaderSkeleton, TableSkeleton } from "@/components/PageSkeletons";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -31,17 +31,6 @@ export default function DashboardPage() {
   const revenueData = useMemo(() => {
     return (monthlyRevenue || []).slice(-6);
   }, [monthlyRevenue]);
-
-  if (
-    loadingCustomersCount ||
-    loadingOrdersCount ||
-    loadingRevenueTotal ||
-    loadingRecentOrders ||
-    loadingRevenueByMonth ||
-    loadingTopCustomers
-  ) {
-    return <div className="space-y-6 max-w-[1200px]"><HeaderSkeleton /><CardGridSkeleton cards={4} /><TableSkeleton rows={3} cols={4} /></div>;
-  }
 
   const firstName = user?.name?.split(" ")[0] || "there";
 
@@ -77,14 +66,46 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} icon={DollarSign} delay={50} />
-        <KpiCard title="Orders" value={totalOrders.toString()} icon={ShoppingCart} delay={100} />
-        <KpiCard title="Customers" value={totalCustomers.toString()} icon={Users} delay={150} />
-        <KpiCard title="Avg. Order" value={`$${avgOrderValue.toLocaleString()}`} icon={TrendingUp} delay={200} />
+        <KpiCard
+          title="Total Revenue"
+          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : `$${totalRevenue.toLocaleString()}`}
+          icon={DollarSign}
+          delay={50}
+        />
+        <KpiCard
+          title="Orders"
+          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
+          icon={ShoppingCart}
+          delay={100}
+        />
+        <KpiCard
+          title="Customers"
+          value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
+          icon={Users}
+          delay={150}
+        />
+        <KpiCard
+          title="Avg. Order"
+          value={loadingRevenueTotal || loadingOrdersCount ? <Skeleton className="h-8 w-20 rounded-md" /> : `$${avgOrderValue.toLocaleString()}`}
+          icon={TrendingUp}
+          delay={200}
+        />
       </div>
 
-      {revenueData.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {loadingRevenueByMonth ? (
+          <>
+            <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
+              <Skeleton className="h-[220px] w-full rounded-xl" />
+            </div>
+            <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Orders Trend</h3>
+              <Skeleton className="h-[220px] w-full rounded-xl" />
+            </div>
+          </>
+        ) : revenueData.length > 0 ? (
+          <>
           <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
             <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
             <ResponsiveContainer width="100%" height={220}>
@@ -110,13 +131,20 @@ export default function DashboardPage() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      )}
+          </>
+        ) : null}
+      </div>
 
       {/* Recent Orders */}
       <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "350ms" }}>
         <h3 className="font-heading font-semibold text-foreground mb-4">Recent Orders</h3>
-        {recentOrders.length === 0 ? (
+        {loadingRecentOrders ? (
+          <div className="space-y-3 py-1">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        ) : recentOrders.length === 0 ? (
           <p className="text-muted-foreground font-body text-sm text-center py-6">No orders yet. Run a Shopify sync to pull data.</p>
         ) : (
           <>
@@ -157,7 +185,13 @@ export default function DashboardPage() {
       {/* Top Customers */}
       <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "400ms" }}>
         <h3 className="font-heading font-semibold text-foreground mb-4">Top Customers</h3>
-        {topCustomers.length === 0 ? (
+        {loadingTopCustomers ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <Skeleton className="h-16 w-full rounded-xl" />
+            <Skeleton className="h-16 w-full rounded-xl" />
+            <Skeleton className="h-16 w-full rounded-xl" />
+          </div>
+        ) : topCustomers.length === 0 ? (
           <p className="text-muted-foreground font-body text-sm text-center py-6">No customers yet.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

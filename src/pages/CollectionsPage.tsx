@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
-import { HeaderSkeleton, SearchRowSkeleton, TableSkeleton } from "@/components/PageSkeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function CollectionsPage() {
   const [search, setSearch] = useState("");
@@ -33,8 +33,6 @@ export default function CollectionsPage() {
   useEffect(() => {
     setPage(1);
   }, [search, pageSize, fromDate, toDate, sortBy, sortDir]);
-
-  if (isLoading) return <div className="space-y-5 max-w-[1200px]"><HeaderSkeleton /><SearchRowSkeleton /><TableSkeleton rows={8} cols={5} /></div>;
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -101,7 +99,16 @@ export default function CollectionsPage() {
           </div>
         </div>
       </BottomSheet>
-      {collections.length === 0 ? (
+      {isLoading ? (
+        <div className="card-float p-5">
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
+      ) : collections.length === 0 ? (
         <div className="card-float p-10 text-center"><p className="text-muted-foreground font-body">No collections found. Run sync to import collections.</p></div>
       ) : (
         <div className="card-float p-5 overflow-x-auto">
