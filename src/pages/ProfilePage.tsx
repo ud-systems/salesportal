@@ -24,7 +24,7 @@ export default function ProfilePage() {
           <AlertCircle className="h-4 w-4 text-warning" />
           <AlertTitle className="font-heading text-foreground">Account setup needed</AlertTitle>
           <AlertDescription className="font-body text-muted-foreground text-sm">
-            You are signed in, but there is no role record in the database yet. Ask an administrator to add your user in Settings → Salespersons so your assignments match Shopify customer metafields (SP / referred-by).
+            You are signed in, but there is no role record in the database yet. Ask an administrator to assign your role in Settings → Users so your assignments match Shopify customer metafields (SP / referred-by).
           </AlertDescription>
         </Alert>
       )}

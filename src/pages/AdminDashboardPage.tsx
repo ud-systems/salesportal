@@ -16,7 +16,14 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
+
 const COLORS = ["hsl(100, 42%, 45%)", "hsl(100, 50%, 50%)", "hsl(40, 96%, 60%)", "hsl(210, 80%, 55%)", "hsl(0, 70%, 55%)"];
+const DASHBOARD_UNASSIGNED = "Unassigned";
+/** Matches Customers / sync: null or literal Unassigned */
+function customerIsUnassigned(c: { sp_assigned?: string | null }): boolean {
+  return !c.sp_assigned || c.sp_assigned === DASHBOARD_UNASSIGNED;
+}
+const UNASSIGNED_PIE_COLOR = "hsl(38, 92%, 50%)";
 
 export default function AdminDashboardPage() {
   const LICENSE_BANNER_DISMISS_UNTIL_KEY = "datapulse_license_banner_dismiss_until_ms";
@@ -67,12 +74,26 @@ export default function AdminDashboardPage() {
 
   const salesBySP = useMemo(() => {
     const map: Record<string, number> = {};
+    let unassignedRevenue = 0;
     for (const c of customers || []) {
-      if (c.sp_assigned && c.sp_assigned !== "Unassigned") {
-        map[c.sp_assigned] = (map[c.sp_assigned] || 0) + Number(c.total_revenue || 0);
+      if (customerIsUnassigned(c)) {
+        unassignedRevenue += Number(c.total_revenue || 0);
+        continue;
       }
+      const key = c.sp_assigned as string;
+      map[key] = (map[key] || 0) + Number(c.total_revenue || 0);
     }
-    return Object.entries(map).map(([name, revenue]) => ({ name: name.split(" ")[0], fullName: name, revenue }));
+    const assignedRows = Object.entries(map)
+      .map(([name, revenue]) => ({ name: name.split(" ")[0], fullName: name, revenue }))
+      .sort((a, b) => b.revenue - a.revenue);
+    const unassignedCount = (customers || []).filter(customerIsUnassigned).length;
+    if (unassignedCount > 0 || unassignedRevenue > 0) {
+      return [
+        ...assignedRows,
+        { name: DASHBOARD_UNASSIGNED, fullName: DASHBOARD_UNASSIGNED, revenue: unassignedRevenue },
+      ];
+    }
+    return assignedRows;
   }, [customers]);
 
   const expiryMs = licenseExpiresAt ? new Date(licenseExpiresAt).getTime() : 0;
@@ -216,18 +237,28 @@ export default function AdminDashboardPage() {
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={salesBySP} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="revenue" nameKey="name">
-                  {salesBySP.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                  {salesBySP.map((sp, index) => {
+                    const assignedBefore = salesBySP.slice(0, index).filter((s) => s.fullName !== DASHBOARD_UNASSIGNED).length;
+                    const fill =
+                      sp.fullName === DASHBOARD_UNASSIGNED ? UNASSIGNED_PIE_COLOR : COLORS[assignedBefore % COLORS.length];
+                    return <Cell key={sp.fullName} fill={fill} />;
+                  })}
                 </Pie>
                 <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontFamily: "Inter Tight", fontSize: 13 }} formatter={(value: number) => `$${value.toLocaleString()}`} />
               </PieChart>
             </ResponsiveContainer>
             <div className="flex flex-wrap justify-center gap-3 mt-2">
-              {salesBySP.map((sp, i) => (
-                <div key={sp.fullName} className="flex items-center gap-1.5 text-xs font-body text-muted-foreground">
-                  <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                  {sp.name}
-                </div>
-              ))}
+              {salesBySP.map((sp, index) => {
+                const assignedBefore = salesBySP.slice(0, index).filter((s) => s.fullName !== DASHBOARD_UNASSIGNED).length;
+                const dotColor =
+                  sp.fullName === DASHBOARD_UNASSIGNED ? UNASSIGNED_PIE_COLOR : COLORS[assignedBefore % COLORS.length];
+                return (
+                  <div key={sp.fullName} className="flex items-center gap-1.5 text-xs font-body text-muted-foreground">
+                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
+                    {sp.name}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -240,13 +271,27 @@ export default function AdminDashboardPage() {
               <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Customers</th><th className="text-right py-2.5 font-medium">Revenue</th></tr></thead>
               <tbody>
                 {salesBySP.map((sp) => {
-                  const custCount = (customers || []).filter((c) => c.sp_assigned === sp.fullName).length;
+                  const custCount =
+                    sp.fullName === DASHBOARD_UNASSIGNED
+                      ? (customers || []).filter(customerIsUnassigned).length
+                      : (customers || []).filter((c) => c.sp_assigned === sp.fullName).length;
+                  const isUnassignedRow = sp.fullName === DASHBOARD_UNASSIGNED;
                   return (
                     <tr key={sp.fullName} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
                       <td className="py-3">
                         <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center">
-                            <span className="text-primary-foreground text-[10px] font-bold font-heading">{sp.fullName.split(" ").map((w) => w[0]).join("")}</span>
+                          <div
+                            className={`h-8 w-8 rounded-full flex items-center justify-center ${
+                              isUnassignedRow ? "bg-warning/20" : "gradient-primary"
+                            }`}
+                          >
+                            <span
+                              className={`text-[10px] font-bold font-heading ${
+                                isUnassignedRow ? "text-warning" : "text-primary-foreground"
+                              }`}
+                            >
+                              {sp.fullName.split(" ").map((w) => w[0]).join("")}
+                            </span>
                           </div>
                           <p className="font-medium text-foreground">{sp.fullName}</p>
                         </div>
@@ -261,7 +306,10 @@ export default function AdminDashboardPage() {
           </div>
           <div className="md:hidden space-y-3">
             {salesBySP.map((sp) => {
-              const custCount = (customers || []).filter((c) => c.sp_assigned === sp.fullName).length;
+              const custCount =
+                sp.fullName === DASHBOARD_UNASSIGNED
+                  ? (customers || []).filter(customerIsUnassigned).length
+                  : (customers || []).filter((c) => c.sp_assigned === sp.fullName).length;
               return (
                 <div key={sp.fullName} className="p-3 rounded-xl bg-muted/50 tap-scale">
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>

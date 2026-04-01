@@ -619,6 +619,11 @@ export function usePurchaseOrdersPaginated(params: PurchaseOrdersQueryParams) {
 
 export type ShopifySyncModule = "customers" | "orders" | "products" | "collections" | "purchase_orders";
 
+/** Clears the customers incremental window so the next run re-upserts all customers (up to page limits per run). */
+export type TriggerSyncOptions = {
+  reset_customer_checkpoint?: boolean;
+};
+
 async function assertLicenseActive() {
   const { data, error } = await supabase
     .from("app_settings")
@@ -638,7 +643,7 @@ async function assertLicenseActive() {
   }
 }
 
-export async function triggerSync(module?: ShopifySyncModule) {
+export async function triggerSync(module?: ShopifySyncModule, options?: TriggerSyncOptions) {
   await assertLicenseActive();
   const accessToken = await getAccessTokenForEdgeFunctions();
   if (!accessToken) {
@@ -646,7 +651,10 @@ export async function triggerSync(module?: ShopifySyncModule) {
   }
   try {
     const { data, error } = await supabase.functions.invoke("shopify-sync", {
-      body: module ? { module } : {},
+      body: {
+        ...(module ? { module } : {}),
+        ...(options?.reset_customer_checkpoint ? { reset_customer_checkpoint: true } : {}),
+      },
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
@@ -681,17 +689,29 @@ function moduleUpToDate(mod?: SyncModuleResult) {
   if (note.includes("run sync again")) return false;
   if (note.includes("stopped at ") && note.includes("pages")) return false;
   if (note.includes("already up to date")) return true;
+  if (note.includes("incremental window:")) return true;
   // Success with zero writes only when nothing signaled continuation above (e.g. PO pass matched 0 rows).
   return Number(mod.synced ?? 0) === 0;
 }
 
-export async function triggerSyncUntilUpToDate(maxRuns = 20, module?: ShopifySyncModule) {
+export type TriggerSyncUntilUpToDateOptions = {
+  /** First run only: clears customers checkpoint so incremental updatedAt window does not skip everyone. */
+  resetCustomerCheckpointFirstRun?: boolean;
+};
+
+export async function triggerSyncUntilUpToDate(
+  maxRuns = 20,
+  module?: ShopifySyncModule,
+  untilOptions?: TriggerSyncUntilUpToDateOptions,
+) {
   let runs = 0;
   let lastResult: any = null;
 
   while (runs < maxRuns) {
     runs++;
-    lastResult = await triggerSync(module);
+    const resetCustomer =
+      untilOptions?.resetCustomerCheckpointFirstRun === true && runs === 1 && module === "customers";
+    lastResult = await triggerSync(module, resetCustomer ? { reset_customer_checkpoint: true } : undefined);
     const r = lastResult?.results || {};
     if (module) {
       if (moduleUpToDate(r[module])) {

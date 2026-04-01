@@ -6,26 +6,18 @@ import {
   SHOPIFY_ADMIN_API_VERSION,
 } from "../_shared/shopify-credentials.ts";
 import { resolveShopifyAuth } from "../_shared/shopify-auth.ts";
+import {
+  findSalespersonRow,
+  isShopifyNoReferralChoice,
+  labelsMatchShopifyToRole,
+  metafieldValueForKeysOrdered,
+  normalizeSalespersonLabel,
+  REFERRED_BY_METAFIELD_KEYS_ORDERED,
+  SP_ASSIGNED_METAFIELD_KEYS_ORDERED,
+  stripReferralPrefix,
+} from "../_shared/salesperson-match.ts";
 
 type SalespersonRow = { user_id: string; salesperson_name: string | null };
-
-function normalizeSalespersonLabel(s: string | null | undefined): string {
-  return (s || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function metafieldByKeys(
-  metafields: { key: string; value: string }[],
-  keys: string[],
-): string | null {
-  const want = new Set(keys.map((k) => k.toLowerCase()));
-  const hit = metafields.find((m) => want.has(m.key.toLowerCase()));
-  return hit?.value ?? null;
-}
 
 function b64FromBytes(bytes: Uint8Array): string {
   let binary = "";
@@ -61,14 +53,21 @@ async function upsertSalespersonAssignments(
   salespeople: SalespersonRow[],
 ) {
   const assignedNorm = normalizeSalespersonLabel(spAssignedDisplay);
-  const refNorm = referredByDisplay ? normalizeSalespersonLabel(referredByDisplay) : "";
   const payloads: { customer_id: string; salesperson_user_id: string; source: string }[] = [];
   for (const sp of salespeople) {
     const nm = normalizeSalespersonLabel(sp.salesperson_name);
     if (!nm) continue;
-    if (assignedNorm && assignedNorm !== "unassigned" && assignedNorm === nm) {
+    if (
+      assignedNorm &&
+      assignedNorm !== "unassigned" &&
+      labelsMatchShopifyToRole(spAssignedDisplay, sp.salesperson_name)
+    ) {
       payloads.push({ customer_id: customerUuid, salesperson_user_id: sp.user_id, source: "sp_assigned" });
-    } else if (refNorm && refNorm === nm) {
+    } else if (
+      referredByDisplay?.trim() &&
+      !isShopifyNoReferralChoice(referredByDisplay) &&
+      labelsMatchShopifyToRole(referredByDisplay, sp.salesperson_name)
+    ) {
       payloads.push({ customer_id: customerUuid, salesperson_user_id: sp.user_id, source: "referred_by" });
     }
   }
@@ -227,7 +226,7 @@ Deno.serve(async (req) => {
               countryCodeV2
               zip
             }
-            metafields(first: 50) { edges { node { key value } } }
+            metafields(first: 80) { edges { node { namespace key value } } }
             numberOfOrders
             amountSpent { amount currencyCode }
             createdAt
@@ -241,16 +240,23 @@ Deno.serve(async (req) => {
       const c = data?.customer;
       if (!c?.id) return null;
       const shopifyId = String(c.id).replace("gid://shopify/Customer/", "");
-      const metafields = (c.metafields?.edges || []).map((e: { node: { key: string; value: string } }) => e.node);
-      const spAssigned =
-        metafieldByKeys(metafields, ["SP_Assigned", "sp_assigned", "sp_assigned_customer", "Salesperson", "salesperson"]) ||
-        "Unassigned";
-      const referredBy = metafieldByKeys(metafields, ["Referredby", "referredby", "referred_by", "referredBy", "Referrer", "referrer"]);
+      const metafields = (c.metafields?.edges || []).map(
+        (e: { node: { namespace?: string; key: string; value: string } }) => e.node,
+      );
+      let spAssigned =
+        metafieldValueForKeysOrdered(metafields, SP_ASSIGNED_METAFIELD_KEYS_ORDERED) || "Unassigned";
+      let referredBy = metafieldValueForKeysOrdered(metafields, REFERRED_BY_METAFIELD_KEYS_ORDERED);
+      if (referredBy) {
+        const stripped = stripReferralPrefix(referredBy).trim();
+        referredBy = stripped || null;
+      }
+      if (referredBy && isShopifyNoReferralChoice(referredBy)) {
+        referredBy = null;
+      }
 
       // If Shopify doesn't provide SP_Assigned, infer from `referred_by` to keep UI consistent.
       if (!spAssigned || spAssigned.trim().toLowerCase() === "unassigned") {
-        const refNorm = normalizeSalespersonLabel(referredBy || "");
-        const hit = salespeople.find((sp) => normalizeSalespersonLabel(sp.salesperson_name) === refNorm);
+        const hit = findSalespersonRow(salespeople, referredBy);
         if (hit?.salesperson_name) spAssigned = hit.salesperson_name;
       }
       const addr = c.defaultAddress;

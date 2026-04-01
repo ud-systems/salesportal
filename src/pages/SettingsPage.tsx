@@ -7,8 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Settings, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle, RefreshCw, Bell } from "lucide-react";
+import { Settings, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle, RefreshCw, Bell, SlidersHorizontal, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SettingsUserManagement } from "@/components/settings/SettingsUserManagement";
 import {
   normalizeShopifyAdminTokenClient,
   normalizeShopifyDomainClient,
@@ -237,9 +239,22 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-heading font-bold text-foreground">Settings</h1>
-        <p className="text-muted-foreground text-sm mt-1">Configure your integrations and preferences</p>
+        <p className="text-muted-foreground text-sm mt-1">Configure your integrations, license, and team accounts</p>
       </div>
 
+      <Tabs defaultValue="app" className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-2 h-auto p-1 gap-1">
+          <TabsTrigger value="app" className="gap-2 font-body">
+            <SlidersHorizontal className="h-4 w-4 shrink-0" />
+            Application
+          </TabsTrigger>
+          <TabsTrigger value="users" className="gap-2 font-body">
+            <Users className="h-4 w-4 shrink-0" />
+            Users
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="app" className="mt-6 space-y-6 focus-visible:outline-none">
       {/* Shopify Connection */}
       <Card>
         <CardHeader>
@@ -528,6 +543,12 @@ export default function SettingsPage() {
           Save All Settings
         </Button>
       </div>
+        </TabsContent>
+
+        <TabsContent value="users" className="mt-6 focus-visible:outline-none">
+          <SettingsUserManagement />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

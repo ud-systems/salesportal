@@ -33,7 +33,7 @@ export function KpiCard({ title, value, change, icon: Icon, delay = 0 }: KpiCard
           </span>
         )}
       </div>
-      <p className="text-2xl font-heading font-bold text-foreground">{value}</p>
+      <div className="text-2xl font-heading font-bold text-foreground">{value}</div>
       <p className="text-sm text-muted-foreground font-body mt-0.5">{title}</p>
     </div>
   );

@@ -6,6 +6,16 @@ import {
   SHOPIFY_ADMIN_API_VERSION,
 } from "../_shared/shopify-credentials.ts";
 import { resolveShopifyAuth } from "../_shared/shopify-auth.ts";
+import {
+  findSalespersonRow,
+  isShopifyNoReferralChoice,
+  labelsMatchShopifyToRole,
+  metafieldValueForKeysOrdered,
+  normalizeSalespersonLabel,
+  REFERRED_BY_METAFIELD_KEYS_ORDERED,
+  SP_ASSIGNED_METAFIELD_KEYS_ORDERED,
+  stripReferralPrefix,
+} from "../_shared/salesperson-match.ts";
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -62,24 +72,6 @@ async function assertDataPulseLicenseActive(
   return { code, expiresAt: payload.expires_at || expiresAt };
 }
 
-function normalizeSalespersonLabel(s: string | null | undefined): string {
-  return (s || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function metafieldByKeys(
-  metafields: { key: string; value: string }[],
-  keys: string[],
-): string | null {
-  const want = new Set(keys.map((k) => k.toLowerCase()));
-  const hit = metafields.find((m) => want.has(m.key.toLowerCase()));
-  return hit?.value ?? null;
-}
-
 type SalespersonRow = { user_id: string; salesperson_name: string | null };
 
 async function upsertSalespersonAssignments(
@@ -90,14 +82,21 @@ async function upsertSalespersonAssignments(
   salespeople: SalespersonRow[],
 ) {
   const assignedNorm = normalizeSalespersonLabel(spAssignedDisplay);
-  const refNorm = referredByDisplay ? normalizeSalespersonLabel(referredByDisplay) : "";
   const payloads: { customer_id: string; salesperson_user_id: string; source: string }[] = [];
   for (const sp of salespeople) {
     const nm = normalizeSalespersonLabel(sp.salesperson_name);
     if (!nm) continue;
-    if (assignedNorm && assignedNorm !== "unassigned" && assignedNorm === nm) {
+    if (
+      assignedNorm &&
+      assignedNorm !== "unassigned" &&
+      labelsMatchShopifyToRole(spAssignedDisplay, sp.salesperson_name)
+    ) {
       payloads.push({ customer_id: customerUuid, salesperson_user_id: sp.user_id, source: "sp_assigned" });
-    } else if (refNorm && refNorm === nm) {
+    } else if (
+      referredByDisplay?.trim() &&
+      !isShopifyNoReferralChoice(referredByDisplay) &&
+      labelsMatchShopifyToRole(referredByDisplay, sp.salesperson_name)
+    ) {
       payloads.push({ customer_id: customerUuid, salesperson_user_id: sp.user_id, source: "referred_by" });
     }
   }
@@ -156,6 +155,7 @@ Deno.serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   await assertDataPulseLicenseActive(supabase);
   const requestBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+  const resetCustomerCheckpoint = requestBody?.reset_customer_checkpoint === true;
   const requestedModule = typeof requestBody?.module === "string" ? requestBody.module : null;
   const allowedModules = new Set(["customers", "orders", "products", "collections", "purchase_orders"]);
   if (requestedModule && !allowedModules.has(requestedModule)) {
@@ -273,6 +273,19 @@ Deno.serve(async (req) => {
     customersLogId = crypto.randomUUID();
     await supabase.from("sync_logs").insert({ id: customersLogId, sync_type: "customers", status: "running" });
 
+    if (resetCustomerCheckpoint) {
+      const { error: resetCpErr } = await supabase.from("sync_checkpoints").upsert(
+        {
+          sync_type: "customers",
+          cursor: null,
+          last_completed_at: null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "sync_type" },
+      );
+      if (resetCpErr) console.error("reset_customer_checkpoint upsert failed:", resetCpErr.message);
+    }
+
     let hasNextPage = true;
     const customerCheckpoint = await getCheckpoint("customers");
     let cursor: string | null = customerCheckpoint.cursor;
@@ -282,6 +295,7 @@ Deno.serve(async (req) => {
     let customerReachedCutoff = false;
     let totalSynced = 0;
     let customerPages = 0;
+    let incrementalCutoffHit = false;
     const MAX_CUSTOMER_PAGES = Number(Deno.env.get("SHOPIFY_MAX_CUSTOMER_PAGES_PER_RUN") ?? "25");
 
     const { data: salespeopleRows } = await supabase
@@ -314,7 +328,7 @@ Deno.serve(async (req) => {
                 countryCodeV2
                 zip
               }
-              metafields(first: 50) {
+              metafields(first: 80) {
                 edges {
                   node {
                     namespace
@@ -377,29 +391,27 @@ Deno.serve(async (req) => {
         const c = edge.node;
         if (customerCutoffMs && c.updatedAt && new Date(c.updatedAt).getTime() <= customerCutoffMs) {
           customerReachedCutoff = true;
+          incrementalCutoffHit = true;
           hasNextPage = false;
           break;
         }
         const shopifyId = c.id.replace("gid://shopify/Customer/", "");
         const metafields = c.metafields?.edges?.map((e: { node: { namespace: string; key: string; value: string } }) => e.node) || [];
         let spAssigned =
-          metafieldByKeys(metafields, ["SP_Assigned", "sp_assigned", "sp_assigned_customer", "Salesperson", "salesperson"]) ||
-          "Unassigned";
-        const referredBy = metafieldByKeys(metafields, [
-          "Referredby",
-          "referredby",
-          "referred_by",
-          "Referred_By",
-          "referredBy",
-          "Referrer",
-          "referrer",
-        ]);
+          metafieldValueForKeysOrdered(metafields, SP_ASSIGNED_METAFIELD_KEYS_ORDERED) || "Unassigned";
+        let referredBy = metafieldValueForKeysOrdered(metafields, REFERRED_BY_METAFIELD_KEYS_ORDERED);
+        if (referredBy) {
+          const stripped = stripReferralPrefix(referredBy).trim();
+          referredBy = stripped || null;
+        }
+        if (referredBy && isShopifyNoReferralChoice(referredBy)) {
+          referredBy = null;
+        }
 
         // If Shopify doesn't set SP_Assigned (or sets "Unassigned"), infer it from `referred_by`
         // so UI assignment status stays correct.
         if (!spAssigned || spAssigned.trim().toLowerCase() === "unassigned") {
-          const refNorm = normalizeSalespersonLabel(referredBy || "");
-          const hit = salespeople.find((sp) => normalizeSalespersonLabel(sp.salesperson_name) === refNorm);
+          const hit = findSalespersonRow(salespeople, referredBy);
           if (hit?.salesperson_name) spAssigned = hit.salesperson_name;
         }
 
@@ -484,7 +496,9 @@ Deno.serve(async (req) => {
         : hasNextPage
           ? `Stopped at ${MAX_CUSTOMER_PAGES} pages; run sync again for more customers.`
           : totalSynced === 0
-            ? "Already up to date (no new customer changes)."
+            ? incrementalCutoffHit
+              ? "Incremental window: no Shopify customer updatedAt is newer than your last completed customer sync (minus 5 min), so nothing was re-imported. Use reset_customer_checkpoint / “Full customer resync” to rebuild all customer rows (e.g. after code or metafield logic changes)."
+              : "Already up to date (no customer rows to process this run)."
             : undefined,
       checkpointUnavailable ? checkpointNote : undefined,
     ].filter(Boolean).join(" ");

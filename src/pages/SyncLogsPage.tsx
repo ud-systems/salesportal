@@ -1,4 +1,9 @@
-import { useSyncLogs, triggerSync, triggerSyncUntilUpToDate, type ShopifySyncModule } from "@/hooks/use-shopify-data";
+import {
+  useSyncLogs,
+  triggerSync,
+  triggerSyncUntilUpToDate,
+  type ShopifySyncModule,
+} from "@/hooks/use-shopify-data";
 import { RefreshCw, CheckCircle, XCircle, Loader2, Info, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
@@ -124,6 +129,26 @@ export default function SyncLogsPage() {
     await handleAutoSyncModule(selectedModule);
   };
 
+  /** Clears the customers incremental checkpoint once, then auto-runs until the full catalog is processed (same as multiple “Sync Selected” runs). */
+  const handleFullCustomerResync = async () => {
+    setSyncing(true);
+    try {
+      const out = await triggerSyncUntilUpToDate(20, "customers", { resetCustomerCheckpointFirstRun: true });
+      const r = out?.result?.results?.customers;
+      const note = r?.note ? ` · ${r.note}` : "";
+      toast.success(out.completed ? "Customer full resync finished" : "Customer resync paused at max runs", {
+        description: `Runs: ${out.runs} · Synced: ${r?.synced ?? 0}${note}`,
+      });
+      queryClient.invalidateQueries();
+    } catch (err) {
+      toast.error("Customer full resync failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const statusIcon = (status: string) => {
     switch (status) {
       case "success": return <CheckCircle className="h-4 w-4 text-primary" />;
@@ -157,27 +182,39 @@ export default function SyncLogsPage() {
           </button>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-2">
-        <Select value={selectedModule} onValueChange={(value: "all" | ShopifySyncModule) => setSelectedModule(value)}>
-          <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
-            <SelectValue placeholder="Select auto sync target" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Modules</SelectItem>
-            <SelectItem value="customers">Customers</SelectItem>
-            <SelectItem value="orders">Orders</SelectItem>
-            <SelectItem value="products">Products</SelectItem>
-            <SelectItem value="collections">Collections</SelectItem>
-            <SelectItem value="purchase_orders">Purchase Orders</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button disabled={syncing} variant="outline" className="rounded-xl tap-scale font-body" onClick={handleAutoSyncSelection}>
-          {syncing
-            ? "Sync in progress..."
-            : selectedModule === "all"
-              ? "Auto Sync Selected (All)"
-              : `Auto Sync Selected (${moduleLabel(selectedModule)})`}
-        </Button>
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-2">
+          <Select value={selectedModule} onValueChange={(value: "all" | ShopifySyncModule) => setSelectedModule(value)}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Select auto sync target" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Modules</SelectItem>
+              <SelectItem value="customers">Customers</SelectItem>
+              <SelectItem value="orders">Orders</SelectItem>
+              <SelectItem value="products">Products</SelectItem>
+              <SelectItem value="collections">Collections</SelectItem>
+              <SelectItem value="purchase_orders">Purchase Orders</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button disabled={syncing} variant="outline" className="rounded-xl tap-scale font-body" onClick={handleAutoSyncSelection}>
+            {syncing
+              ? "Sync in progress..."
+              : selectedModule === "all"
+                ? "Auto Sync Selected (All)"
+                : `Auto Sync Selected (${moduleLabel(selectedModule)})`}
+          </Button>
+        </div>
+        {selectedModule === "customers" && (
+          <Button
+            disabled={syncing}
+            variant="secondary"
+            className="rounded-xl tap-scale font-body w-full sm:w-auto sm:self-start"
+            onClick={handleFullCustomerResync}
+          >
+            {syncing ? "…" : "Full customer resync (reset incremental window)"}
+          </Button>
+        )}
       </div>
 
       {isMobile ? (
@@ -189,6 +226,11 @@ export default function SyncLogsPage() {
             </p>
             <p>
               Rows stuck on <span className="text-info">spinning</span> for more than ~30 minutes are auto-marked failed on the next sync. While a row shows running, this page refreshes every few seconds.
+            </p>
+            <p>
+              <strong className="text-foreground">Customers</strong> sync skips everyone whose Shopify <code className="text-xs">updatedAt</code> is older than your last completed customer run (incremental). If you see “Synced: 0” but need to refresh metafields or assignments, select Customers and use{" "}
+              <strong className="text-foreground">Full customer resync</strong>, or in Supabase SQL run:{" "}
+              <code className="text-xs break-all">update sync_checkpoints set last_completed_at = null, cursor = null where sync_type = &apos;customers&apos;;</code>
             </p>
           </div>
         </BottomSheet>
@@ -205,6 +247,11 @@ export default function SyncLogsPage() {
               </p>
               <p>
                 Rows stuck on <span className="text-info">spinning</span> for more than ~30 minutes are auto-marked failed on the next sync. While a row shows running, this page refreshes every few seconds.
+              </p>
+              <p>
+                <strong className="text-foreground">Customers</strong> sync skips everyone whose Shopify <code className="text-xs">updatedAt</code> is older than your last completed customer run (incremental). If you see “Synced: 0” but need to refresh metafields or assignments, select Customers and use{" "}
+                <strong className="text-foreground">Full customer resync</strong>, or in Supabase SQL run:{" "}
+                <code className="text-xs break-all">update sync_checkpoints set last_completed_at = null, cursor = null where sync_type = &apos;customers&apos;;</code>
               </p>
             </div>
           </SheetContent>
