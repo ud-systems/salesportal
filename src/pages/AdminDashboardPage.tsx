@@ -1,4 +1,4 @@
-import { DollarSign, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X } from "lucide-react";
+import { DollarSign, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import {
   useCustomers,
@@ -13,7 +13,7 @@ import {
   useOrdersTimeseriesInRange,
   useUnfulfilledOrdersCount,
 } from "@/hooks/use-shopify-data";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useMemo, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -26,13 +26,21 @@ import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
-const COLORS = ["hsl(100, 42%, 45%)", "hsl(100, 50%, 50%)", "hsl(40, 96%, 60%)", "hsl(210, 80%, 55%)", "hsl(0, 70%, 55%)"];
 const DASHBOARD_UNASSIGNED = "Unassigned";
+const TOP_SALES_BAR_COLORS = [
+  "hsl(100 45% 42%)",
+  "hsl(104 46% 46%)",
+  "hsl(110 44% 40%)",
+  "hsl(96 42% 48%)",
+  "hsl(114 38% 44%)",
+  "hsl(92 40% 50%)",
+  "hsl(120 36% 38%)",
+  "hsl(88 38% 46%)",
+];
 /** Matches Customers / sync: null or literal Unassigned */
 function customerIsUnassigned(c: { sp_assigned?: string | null }): boolean {
   return !c.sp_assigned || c.sp_assigned === DASHBOARD_UNASSIGNED;
 }
-const UNASSIGNED_PIE_COLOR = "hsl(38, 92%, 50%)";
 
 export default function AdminDashboardPage() {
   const LICENSE_BANNER_DISMISS_UNTIL_KEY = "datapulse_license_banner_dismiss_until_ms";
@@ -107,6 +115,8 @@ export default function AdminDashboardPage() {
   const [licenseMode, setLicenseMode] = useState<"renewable" | "lifetime">("renewable");
   const [nowMs, setNowMs] = useState(Date.now());
   const [dismissedUntilMs, setDismissedUntilMs] = useState(0);
+  const [salespersonSearch, setSalespersonSearch] = useState("");
+  const [salespersonPage, setSalespersonPage] = useState(1);
 
   useEffect(() => {
     const loadLicenseSettings = async () => {
@@ -160,6 +170,41 @@ export default function AdminDashboardPage() {
     }
     return assignedRows;
   }, [customers]);
+  const salesRows = useMemo(
+    () =>
+      salesBySP.map((sp) => ({
+        ...sp,
+        custCount:
+          sp.fullName === DASHBOARD_UNASSIGNED
+            ? (customers || []).filter(customerIsUnassigned).length
+            : (customers || []).filter((c) => c.sp_assigned === sp.fullName).length,
+      })),
+    [salesBySP, customers],
+  );
+  const filteredSalesRows = useMemo(() => {
+    const q = salespersonSearch.trim().toLowerCase();
+    if (!q) return salesRows;
+    return salesRows.filter((row) => row.fullName.toLowerCase().includes(q) || row.name.toLowerCase().includes(q));
+  }, [salesRows, salespersonSearch]);
+  const SALES_ROWS_PER_PAGE = 8;
+  const topSalesRows = useMemo(() => salesRows.slice(0, 8), [salesRows]);
+  const topSalesMaxRevenue = useMemo(
+    () => Math.max(1, ...topSalesRows.map((row) => Number(row.revenue || 0))),
+    [topSalesRows],
+  );
+  const salespersonTotalPages = Math.max(1, Math.ceil(filteredSalesRows.length / SALES_ROWS_PER_PAGE));
+  const pagedSalesRows = useMemo(() => {
+    const start = (salespersonPage - 1) * SALES_ROWS_PER_PAGE;
+    return filteredSalesRows.slice(start, start + SALES_ROWS_PER_PAGE);
+  }, [filteredSalesRows, salespersonPage]);
+
+  useEffect(() => {
+    setSalespersonPage(1);
+  }, [salespersonSearch]);
+
+  useEffect(() => {
+    if (salespersonPage > salespersonTotalPages) setSalespersonPage(salespersonTotalPages);
+  }, [salespersonPage, salespersonTotalPages]);
 
   const expiryMs = licenseExpiresAt ? new Date(licenseExpiresAt).getTime() : 0;
   const hasLicense = Boolean(licenseCode);
@@ -327,69 +372,85 @@ export default function AdminDashboardPage() {
         </Link>
       </div>
 
-      <div className={`grid grid-cols-1 gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
-        <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
+      <div className={`grid grid-cols-1 items-stretch gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
+        <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <h3 className="font-heading font-semibold text-foreground mb-4">
             {isAll ? `Revenue by Month (${revenueData[0]?.year || year})` : "Revenue (selected period)"}
           </h3>
           {loadingBar ? (
             <Skeleton className="h-[220px] w-full rounded-xl" />
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={barChartData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }} barCategoryGap="22%">
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
-                <YAxis width={48} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => formatCompactMoney(v, currency)} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Revenue"]} />
-                <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="flex-1 min-h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={barChartData}
+                  margin={{ top: 6, right: 0, left: 0, bottom: 0 }}
+                  barCategoryGap="8%"
+                  barGap={0}
+                  maxBarSize={40}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
+                  <YAxis width={48} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => formatCompactMoney(v, currency)} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Revenue"]} />
+                  <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
         </div>
         {!loadingCustomers && salesBySP.length > 0 && (
-          <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
-            <h3 className="font-heading font-semibold text-foreground mb-4">Sales by Salesperson</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={salesBySP} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="revenue" nameKey="name">
-                  {salesBySP.map((sp, index) => {
-                    const assignedBefore = salesBySP.slice(0, index).filter((s) => s.fullName !== DASHBOARD_UNASSIGNED).length;
-                    const fill =
-                      sp.fullName === DASHBOARD_UNASSIGNED ? UNASSIGNED_PIE_COLOR : COLORS[assignedBefore % COLORS.length];
-                    return <Cell key={sp.fullName} fill={fill} />;
-                  })}
-                </Pie>
-                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => formatOrderMoney(value, null, currency)} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex flex-wrap justify-center gap-3 mt-2">
-              {salesBySP.map((sp, index) => {
-                const assignedBefore = salesBySP.slice(0, index).filter((s) => s.fullName !== DASHBOARD_UNASSIGNED).length;
-                const dotColor =
-                  sp.fullName === DASHBOARD_UNASSIGNED ? UNASSIGNED_PIE_COLOR : COLORS[assignedBefore % COLORS.length];
+          <div className="card-float p-5 h-full opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
+            <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 Salesperson Revenue Progress</h3>
+            <div className="space-y-3">
+              {topSalesRows.map((sp, idx) => {
+                const widthPct = Math.max(4, Math.round((Number(sp.revenue || 0) / topSalesMaxRevenue) * 100));
+                const barColor = TOP_SALES_BAR_COLORS[idx % TOP_SALES_BAR_COLORS.length];
                 return (
-                  <div key={sp.fullName} className="flex items-center gap-1.5 text-xs font-body text-muted-foreground">
-                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dotColor }} />
-                    {sp.name}
+                  <div key={sp.fullName} className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="h-8 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-[width] duration-300"
+                          style={{ width: `${widthPct}%`, backgroundColor: barColor }}
+                        />
+                      </div>
+                    </div>
+                    <div className="w-[150px] text-right">
+                      <p className="text-xs font-medium text-foreground truncate">{sp.name}</p>
+                      <p className="text-[11px] text-muted-foreground font-body">
+                        {formatOrderMoney(sp.revenue, null, currency)}
+                      </p>
+                    </div>
                   </div>
                 );
               })}
+              {topSalesRows.length === 0 && (
+                <p className="text-sm text-muted-foreground font-body text-center py-6">No salesperson revenue yet.</p>
+              )}
             </div>
           </div>
         )}
       </div>
       {!loadingCustomers && salesBySP.length > 0 && (
         <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "400ms" }}>
-          <h3 className="font-heading font-semibold text-foreground mb-4">Salesperson Performance</h3>
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="font-heading font-semibold text-foreground">Salesperson Performance</h3>
+            <div className="relative w-full sm:w-[280px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={salespersonSearch}
+                onChange={(e) => setSalespersonSearch(e.target.value)}
+                placeholder="Search salesperson"
+                className="h-9 w-full rounded-xl border bg-card pl-9 pr-3 text-sm font-body"
+              />
+            </div>
+          </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm font-body">
               <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Customers</th><th className="text-right py-2.5 font-medium">Revenue</th></tr></thead>
               <tbody>
-                {salesBySP.map((sp) => {
-                  const custCount =
-                    sp.fullName === DASHBOARD_UNASSIGNED
-                      ? (customers || []).filter(customerIsUnassigned).length
-                      : (customers || []).filter((c) => c.sp_assigned === sp.fullName).length;
+                {pagedSalesRows.map((sp) => {
                   const isUnassignedRow = sp.fullName === DASHBOARD_UNASSIGNED;
                   return (
                     <tr key={sp.fullName} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
@@ -411,7 +472,7 @@ export default function AdminDashboardPage() {
                           <p className="font-medium text-foreground">{sp.fullName}</p>
                         </div>
                       </td>
-                      <td className="py-3 text-right font-medium text-foreground">{custCount}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{sp.custCount}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.revenue, null, currency)}</td>
                     </tr>
                   );
@@ -420,22 +481,49 @@ export default function AdminDashboardPage() {
             </table>
           </div>
           <div className="md:hidden space-y-3">
-            {salesBySP.map((sp) => {
-              const custCount =
-                sp.fullName === DASHBOARD_UNASSIGNED
-                  ? (customers || []).filter(customerIsUnassigned).length
-                  : (customers || []).filter((c) => c.sp_assigned === sp.fullName).length;
+            {pagedSalesRows.map((sp) => {
               return (
                 <div key={sp.fullName} className="p-3 rounded-xl bg-muted/50 tap-scale">
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>
                   <div className="flex justify-between text-xs font-body text-muted-foreground mt-1">
-                    <span>{custCount} customers</span>
+                    <span>{sp.custCount} customers</span>
                     <span className="font-medium text-foreground">{formatOrderMoney(sp.revenue, null, currency)}</span>
                   </div>
                 </div>
               );
             })}
           </div>
+          {filteredSalesRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground font-body text-center py-6">No salespersons match your search.</p>
+          ) : (
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground font-body">
+                Showing {(salespersonPage - 1) * SALES_ROWS_PER_PAGE + 1}-
+                {Math.min(salespersonPage * SALES_ROWS_PER_PAGE, filteredSalesRows.length)} of {filteredSalesRows.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="h-8 rounded-lg px-3 text-xs"
+                  disabled={salespersonPage <= 1}
+                  onClick={() => setSalespersonPage((p) => Math.max(1, p - 1))}
+                >
+                  Prev
+                </Button>
+                <p className="text-xs text-muted-foreground font-body">
+                  Page {salespersonPage} of {salespersonTotalPages}
+                </p>
+                <Button
+                  variant="outline"
+                  className="h-8 rounded-lg px-3 text-xs"
+                  disabled={salespersonPage >= salespersonTotalPages}
+                  onClick={() => setSalespersonPage((p) => Math.min(salespersonTotalPages, p + 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

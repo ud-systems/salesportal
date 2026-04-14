@@ -57,8 +57,16 @@ export function formatOrderMoney(
 /** Compact chart axis (e.g. £12k) */
 export function formatCompactMoney(value: number, currencyCode: string): string {
   const code = (currencyCode || FALLBACK_STORE_CURRENCY).toUpperCase();
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${code} ${(value / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${code} ${Math.round(value / 1_000)}k`;
-  return formatMoneyAmount(value, code);
+  try {
+    return new Intl.NumberFormat(DISPLAY_LOCALE, {
+      style: "currency",
+      currency: code,
+      currencyDisplay: "symbol",
+      notation: "compact",
+      compactDisplay: "short",
+      maximumFractionDigits: 1,
+    }).format(Number(value || 0));
+  } catch {
+    return formatMoneyAmount(value, code);
+  }
 }
