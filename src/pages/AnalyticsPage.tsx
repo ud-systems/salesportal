@@ -15,7 +15,7 @@ import {
 } from "@/hooks/use-shopify-data";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { differenceInCalendarDays } from "date-fns";
-import { formatOrderMoney } from "@/lib/format";
+import { formatDisplayDate, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import {
   ANALYTICS_REPORTS,
@@ -29,9 +29,105 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const PREVIEW_ROW_CAP = 200;
+const MONEY_COLUMN_HINTS = /(revenue|total|subtotal|tax|price|amount|value|avg|average)/i;
+const PDF_BRAND_PRIMARY_RGB: [number, number, number] = [93, 163, 67];
+const PDF_BRAND_SECONDARY_RGB: [number, number, number] = [108, 191, 64];
+
+let logoDataUrlPromise: Promise<string | null> | null = null;
+let logoBadgeDataUrlPromise: Promise<string | null> | null = null;
 
 function reportFileSlug(id: string) {
   return id.replace(/_/g, "-");
+}
+
+function formatPresetLabel(preset: DatePreset): string {
+  switch (preset) {
+    case "today":
+      return "Today";
+    case "week":
+      return "Last 7 Days";
+    case "month":
+      return "This Month";
+    case "quarter":
+      return "This Quarter";
+    case "year":
+      return "This Year";
+    case "custom":
+      return "Custom Range";
+    default:
+      return "Period";
+  }
+}
+
+function getDisplayCurrencyLabel(currencyCode: string): string {
+  const code = (currencyCode || "GBP").toUpperCase();
+  if (code === "GBP") return "British Pounds (GBP)";
+  return code;
+}
+
+function formatReportCell(columnName: string, cell: string | number, currencyCode: string): string {
+  if (!MONEY_COLUMN_HINTS.test(columnName)) return String(cell);
+  const n = typeof cell === "number" ? cell : Number(cell);
+  if (!Number.isFinite(n)) return String(cell);
+  return formatOrderMoney(n, null, currencyCode);
+}
+
+async function getBrandLogoDataUrl(): Promise<string | null> {
+  if (!logoDataUrlPromise) {
+    logoDataUrlPromise = (async () => {
+      try {
+        const response = await fetch("/white logo.png");
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        ctx.drawImage(bitmap, 0, 0);
+        return canvas.toDataURL("image/png");
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return logoDataUrlPromise;
+}
+
+async function getBrandLogoBadgeDataUrl(): Promise<string | null> {
+  if (!logoBadgeDataUrlPromise) {
+    logoBadgeDataUrlPromise = (async () => {
+      try {
+        const size = 240;
+        const radius = 36;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        const gradient = ctx.createLinearGradient(0, 0, size, size);
+        gradient.addColorStop(0, `rgb(${PDF_BRAND_PRIMARY_RGB.join(",")})`);
+        gradient.addColorStop(1, `rgb(${PDF_BRAND_SECONDARY_RGB.join(",")})`);
+        ctx.beginPath();
+        ctx.moveTo(radius, 0);
+        ctx.lineTo(size - radius, 0);
+        ctx.quadraticCurveTo(size, 0, size, radius);
+        ctx.lineTo(size, size - radius);
+        ctx.quadraticCurveTo(size, size, size - radius, size);
+        ctx.lineTo(radius, size);
+        ctx.quadraticCurveTo(0, size, 0, size - radius);
+        ctx.lineTo(0, radius);
+        ctx.quadraticCurveTo(0, 0, radius, 0);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        return canvas.toDataURL("image/png");
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return logoBadgeDataUrlPromise;
 }
 
 export default function AnalyticsPage() {
@@ -157,8 +253,10 @@ export default function AnalyticsPage() {
   }, [previewLoading, previewRows.length, selectedReportId, analyticsTab]);
 
   const periodSubtitle = selectedDef?.requiresRange
-    ? `Period: ${preset}${rangeReady ? ` (${fromIso?.slice(0, 10)} → ${toIso?.slice(0, 10)})` : ""}`
-    : "Snapshot (not filtered by analytics period)";
+    ? `Period: ${formatPresetLabel(preset)}${
+        rangeReady ? ` | ${formatDisplayDate(fromIso)} - ${formatDisplayDate(toIso)}` : ""
+      }`
+    : "Snapshot report (not filtered by period)";
 
   const runExportCsv = async () => {
     if (!selectedDef || !canLoadReport) {
@@ -203,21 +301,51 @@ export default function AnalyticsPage() {
       });
       const wide = columns.length > 6;
       const doc = new jsPDF({ unit: "mm", format: "a4", orientation: wide ? "landscape" : "portrait" });
+      const logoDataUrl = await getBrandLogoDataUrl();
+      const logoBadgeDataUrl = await getBrandLogoBadgeDataUrl();
+      const headerX = 14;
+      const logoY = 10;
+      const logoBoxSize = 24;
+      if (logoBadgeDataUrl) {
+        doc.addImage(logoBadgeDataUrl, "PNG", headerX, logoY, logoBoxSize, logoBoxSize);
+      } else {
+        doc.setFillColor(...PDF_BRAND_PRIMARY_RGB);
+        doc.roundedRect(headerX, logoY, logoBoxSize, logoBoxSize, 4, 4, "F");
+      }
+      if (logoDataUrl) {
+        const imgProps = doc.getImageProperties(logoDataUrl);
+        const imgRatio = imgProps.width / imgProps.height;
+        const maxImgSide = logoBoxSize - 6;
+        let imgW = maxImgSide;
+        let imgH = maxImgSide;
+        if (imgRatio > 1) {
+          imgH = imgW / imgRatio;
+        } else if (imgRatio < 1) {
+          imgW = imgH * imgRatio;
+        }
+        const imgX = headerX + (logoBoxSize - imgW) / 2;
+        const imgY = logoY + (logoBoxSize - imgH) / 2;
+        doc.addImage(logoDataUrl, "PNG", imgX, imgY, imgW, imgH);
+      }
       doc.setFontSize(15);
-      doc.text("Sales Portal — " + selectedDef.title, 14, 16);
+      doc.text("Sales Portal — " + selectedDef.title, headerX, 41);
       doc.setFontSize(9);
       doc.setTextColor(90);
-      doc.text(periodSubtitle, 14, 22);
-      doc.text(`Generated ${new Date().toLocaleString("en-GB")} · Display currency: ${currency}`, 14, 27);
+      doc.text(periodSubtitle, headerX, 47);
+      doc.text(
+        `Generated ${new Date().toLocaleString("en-GB")} · Display currency: ${getDisplayCurrencyLabel(currency)}`,
+        headerX,
+        52,
+      );
       doc.setTextColor(0);
 
-      const body = rows.map((r) => r.map((c) => String(c)));
+      const body = rows.map((r) => r.map((c, index) => formatReportCell(columns[index], c, currency)));
       autoTable(doc, {
-        startY: 32,
+        startY: 58,
         head: [columns],
         body,
         styles: { fontSize: wide ? 6 : 7, cellPadding: 1.5 },
-        headStyles: { fillColor: [41, 98, 255] },
+        headStyles: { fillColor: PDF_BRAND_PRIMARY_RGB },
         horizontalPageBreak: true,
         margin: { left: 14, right: 14 },
       });
@@ -545,8 +673,12 @@ export default function AnalyticsPage() {
                           {previewSlice.map((row, i) => (
                             <TableRow key={i}>
                               {row.map((cell, j) => (
-                                <TableCell key={j} className="font-body text-xs max-w-[200px] truncate" title={String(cell)}>
-                                  {String(cell)}
+                                <TableCell
+                                  key={j}
+                                  className="font-body text-xs max-w-[200px] truncate"
+                                  title={formatReportCell(preview.columns[j], cell, currency)}
+                                >
+                                  {formatReportCell(preview.columns[j], cell, currency)}
                                 </TableCell>
                               ))}
                             </TableRow>

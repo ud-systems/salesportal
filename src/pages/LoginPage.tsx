@@ -34,12 +34,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center gradient-bg px-4">
+    <div className="min-h-screen relative flex items-center justify-center gradient-bg px-4">
+      <div className="absolute top-5 left-5 flex items-center gap-2.5">
+        <div className="h-9 w-9 rounded-xl gradient-primary flex items-center justify-center">
+          <img src="/white logo.png" alt="Logo" className="h-5 w-5 object-contain" />
+        </div>
+        <div>
+          <h1 className="font-heading font-bold text-base text-foreground leading-tight">Sales Portal</h1>
+          <p className="text-[11px] text-muted-foreground font-body">Sales Portal</p>
+        </div>
+      </div>
       <div className="w-full max-w-sm opacity-0 animate-slide-up">
         <div className="text-center mb-8">
-          <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center mx-auto mb-4">
-            <img src="/white logo.png" alt="Logo" className="h-8 w-8 object-contain" />
-          </div>
           <h1 className="text-2xl font-heading font-bold text-foreground">Sales Portal</h1>
           <p className="text-muted-foreground font-body text-sm mt-1">Sign in to your account</p>
         </div>
