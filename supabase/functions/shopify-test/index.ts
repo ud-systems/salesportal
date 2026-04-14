@@ -63,13 +63,13 @@ Deno.serve(async (req) => {
         "Content-Type": "application/json",
         "X-Shopify-Access-Token": auth.accessToken,
       },
-      body: JSON.stringify({ query: "{ shop { name primaryDomain { host } } }" }),
+      body: JSON.stringify({ query: "{ shop { name currencyCode primaryDomain { host } } }" }),
     });
 
     const text = await res.text();
     let json: {
       errors?: { message?: string }[] | string;
-      data?: { shop?: { name?: string; primaryDomain?: { host?: string } } };
+      data?: { shop?: { name?: string; currencyCode?: string; primaryDomain?: { host?: string } } };
     } = {};
     try {
       json = JSON.parse(text) as typeof json;

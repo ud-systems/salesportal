@@ -3,10 +3,14 @@ import { KpiCard } from "@/components/KpiCard";
 import {
   useCustomers,
   useCustomersCount,
+  useCustomersCountInRange,
   useOrdersCount,
+  useOrdersMetricsInRange,
   useOrdersTotalRevenue,
   useRecentOrders,
+  useRecentOrdersInRange,
   useRevenueByMonthForYear,
+  useOrdersTimeseriesInRange,
   useUnfulfilledOrdersCount,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
@@ -16,6 +20,11 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { differenceInCalendarDays } from "date-fns";
+import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
+import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 const COLORS = ["hsl(100, 42%, 45%)", "hsl(100, 50%, 50%)", "hsl(40, 96%, 60%)", "hsl(210, 80%, 55%)", "hsl(0, 70%, 55%)"];
 const DASHBOARD_UNASSIGNED = "Unassigned";
@@ -30,13 +39,69 @@ export default function AdminDashboardPage() {
   const ONE_HOUR_MS = 60 * 60 * 1000;
   const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
   const year = new Date().getUTCFullYear();
+  const { data: currency = "GBP" } = useShopDisplayCurrency();
+  const [preset, setPreset] = useState<DatePreset>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const range = useMemo(
+    () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
+    [preset, customFrom, customTo],
+  );
+  const fromIso = toRangeIso(range.from);
+  const toIso = toRangeIso(range.to);
+  const cmpFromIso = toRangeIso(range.compareFrom);
+  const cmpToIso = toRangeIso(range.compareTo);
+  const isAll = preset === "all";
+  const rangeDays =
+    range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
+  const bucket = rangeDays <= 62 ? "day" : "month";
+
   const { data: customers, isLoading: loadingCustomers } = useCustomers();
-  const { data: totalOrders = 0, isLoading: loadingOrdersCount } = useOrdersCount();
-  const { data: totalCustomers = 0, isLoading: loadingCustomersCount } = useCustomersCount();
-  const { data: totalRevenue = 0, isLoading: loadingRevenueTotal } = useOrdersTotalRevenue();
+  const { data: totalOrdersAll = 0, isLoading: loadingOrdersAll } = useOrdersCount();
+  const { data: totalCustomersAll = 0, isLoading: loadingCustomersAll } = useCustomersCount();
+  const { data: totalRevenueAll = 0, isLoading: loadingRevenueAll } = useOrdersTotalRevenue();
+  const { data: metricsRange, isLoading: loadingMetricsRange } = useOrdersMetricsInRange(fromIso, toIso, "admin", !isAll);
+  const { data: metricsCompare } = useOrdersMetricsInRange(cmpFromIso, cmpToIso, "admin", !isAll && Boolean(cmpFromIso && cmpToIso));
+  const { data: customersRange = 0, isLoading: loadingCustomersRange } = useCustomersCountInRange(
+    fromIso,
+    toIso,
+    "admin",
+    !isAll,
+  );
+  const { data: seriesRange = [], isLoading: loadingSeries } = useOrdersTimeseriesInRange(
+    fromIso,
+    toIso,
+    bucket,
+    "admin",
+    !isAll,
+  );
   const { data: unfulfilledOrders = 0, isLoading: loadingUnfulfilled } = useUnfulfilledOrdersCount();
-  const { data: recentOrders = [], isLoading: loadingRecentOrders } = useRecentOrders(10);
+  const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(10);
+  const { data: recentFiltered = [], isLoading: loadingRecentFiltered } = useRecentOrdersInRange(
+    10,
+    fromIso,
+    toIso,
+    "admin",
+    !isAll,
+  );
   const { data: revenueData = [], isLoading: loadingRevenue } = useRevenueByMonthForYear(year);
+  const totalRevenue = isAll ? totalRevenueAll : (metricsRange?.revenue ?? 0);
+  const totalOrders = isAll ? totalOrdersAll : (metricsRange?.count ?? 0);
+  const totalCustomers = isAll ? totalCustomersAll : customersRange;
+  const recentOrders = isAll ? recentOrdersAll : recentFiltered;
+  const loadingRevenueTotal = isAll ? loadingRevenueAll : loadingMetricsRange;
+  const loadingOrdersCount = isAll ? loadingOrdersAll : loadingMetricsRange;
+  const loadingCustomersCount = isAll ? loadingCustomersAll : loadingCustomersRange;
+  const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
+  const prevRevenue = metricsCompare?.revenue ?? 0;
+  const revDelta =
+    !isAll && prevRevenue > 0 ? (((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
+  const barChartData = useMemo(() => {
+    if (isAll) return revenueData;
+    return seriesRange.map((p) => ({ month: p.label, revenue: p.revenue, orders: p.orders, year }));
+  }, [isAll, revenueData, seriesRange, year]);
+  const loadingBar = isAll ? loadingRevenue : loadingSeries;
+
   const [licenseCode, setLicenseCode] = useState("");
   const [licenseExpiresAt, setLicenseExpiresAt] = useState("");
   const [licenseMode, setLicenseMode] = useState<"renewable" | "lifetime">("renewable");
@@ -124,6 +189,48 @@ export default function AdminDashboardPage() {
         <p className="text-muted-foreground font-body text-sm mt-1">Organization-wide overview</p>
       </div>
 
+      <div className="card-float p-4 opacity-0 animate-fade-in flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
+        <div className="flex-1 min-w-[160px]">
+          <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Period</p>
+          <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+            <SelectTrigger className="rounded-xl h-10 font-body">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">Last 7 days</SelectItem>
+              <SelectItem value="month">This month</SelectItem>
+              <SelectItem value="quarter">This quarter</SelectItem>
+              <SelectItem value="year">This year</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {preset === "custom" && (
+          <div className="flex flex-col sm:flex-row gap-2 flex-1">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="h-10 rounded-xl border bg-card px-3 text-sm font-body flex-1"
+            />
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="h-10 rounded-xl border bg-card px-3 text-sm font-body flex-1"
+            />
+          </div>
+        )}
+        {!isAll && (
+          <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
+            vs previous equivalent period
+            {revDelta != null ? ` · Revenue ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
+          </p>
+        )}
+      </div>
+
       {showLicenseBanner && (
         <div
           className={`rounded-xl border p-4 opacity-0 animate-fade-in ${
@@ -188,7 +295,13 @@ export default function AdminDashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <KpiCard
           title="Total Revenue"
-          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : `$${totalRevenue.toLocaleString()}`}
+          value={
+            loadingRevenueTotal ? (
+              <Skeleton className="h-8 w-24 rounded-md" />
+            ) : (
+              formatOrderMoney(totalRevenue, null, currency)
+            )
+          }
           icon={DollarSign}
           delay={50}
         />
@@ -216,16 +329,18 @@ export default function AdminDashboardPage() {
 
       <div className={`grid grid-cols-1 gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
         <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
-          <h3 className="font-heading font-semibold text-foreground mb-4">Revenue by Month ({revenueData[0]?.year || year})</h3>
-          {loadingRevenue ? (
+          <h3 className="font-heading font-semibold text-foreground mb-4">
+            {isAll ? `Revenue by Month (${revenueData[0]?.year || year})` : "Revenue (selected period)"}
+          </h3>
+          {loadingBar ? (
             <Skeleton className="h-[220px] w-full rounded-xl" />
           ) : (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={revenueData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }} barCategoryGap="22%">
+              <BarChart data={barChartData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }} barCategoryGap="22%">
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12, fontFamily: 'Inter Tight' }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
-                <YAxis width={40} tick={{ fontSize: 12, fontFamily: 'Inter Tight' }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `$${Math.round(v / 1000)}k`} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid hsl(var(--border))', fontFamily: 'Inter Tight', fontSize: 13 }} formatter={(value: number) => [`$${value.toLocaleString()}`, "Revenue"]} />
+                <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
+                <YAxis width={48} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => formatCompactMoney(v, currency)} tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Revenue"]} />
                 <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -244,7 +359,7 @@ export default function AdminDashboardPage() {
                     return <Cell key={sp.fullName} fill={fill} />;
                   })}
                 </Pie>
-                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontFamily: "Inter Tight", fontSize: 13 }} formatter={(value: number) => `$${value.toLocaleString()}`} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => formatOrderMoney(value, null, currency)} />
               </PieChart>
             </ResponsiveContainer>
             <div className="flex flex-wrap justify-center gap-3 mt-2">
@@ -297,7 +412,7 @@ export default function AdminDashboardPage() {
                         </div>
                       </td>
                       <td className="py-3 text-right font-medium text-foreground">{custCount}</td>
-                      <td className="py-3 text-right font-medium text-foreground">${sp.revenue.toLocaleString()}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.revenue, null, currency)}</td>
                     </tr>
                   );
                 })}
@@ -315,7 +430,7 @@ export default function AdminDashboardPage() {
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>
                   <div className="flex justify-between text-xs font-body text-muted-foreground mt-1">
                     <span>{custCount} customers</span>
-                    <span className="font-medium text-foreground">${sp.revenue.toLocaleString()}</span>
+                    <span className="font-medium text-foreground">{formatOrderMoney(sp.revenue, null, currency)}</span>
                   </div>
                 </div>
               );
@@ -357,9 +472,11 @@ export default function AdminDashboardPage() {
                     <tr key={order.id} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
                       <td className="py-3 font-medium text-foreground">{order.order_number || order.shopify_order_id}</td>
                       <td className="py-3 text-muted-foreground">{order.customer_name}</td>
-                      <td className="py-3 text-right font-medium text-foreground">${Number(order.total || 0).toLocaleString()}</td>
+                      <td className="py-3 text-right font-medium text-foreground">
+                        {formatOrderMoney(Number(order.total || 0), (order as { currency_code?: string | null }).currency_code, currency)}
+                      </td>
                       <td className="py-3"><StatusBadge status={(order.financial_status || "pending") as any} /></td>
-                      <td className="py-3 text-muted-foreground">{order.shopify_created_at ? new Date(order.shopify_created_at).toLocaleDateString() : "—"}</td>
+                      <td className="py-3 text-muted-foreground">{formatDisplayDate(order.shopify_created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -373,7 +490,9 @@ export default function AdminDashboardPage() {
                     <p className="text-xs text-muted-foreground mt-0.5">{order.customer_name}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium text-foreground text-sm">${Number(order.total || 0).toLocaleString()}</p>
+                    <p className="font-medium text-foreground text-sm">
+                      {formatOrderMoney(Number(order.total || 0), (order as { currency_code?: string | null }).currency_code, currency)}
+                    </p>
                     <StatusBadge status={(order.financial_status || "pending") as any} />
                   </div>
                 </div>

@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/AppSidebar";
+import { PostLoginNotifications } from "@/components/PostLoginNotifications";
 import { Outlet } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -7,6 +8,7 @@ export default function DashboardLayout() {
   const { isAdmin } = useAuth();
   return (
     <div className="min-h-screen flex w-full gradient-bg">
+      <PostLoginNotifications />
       <AppSidebar />
       <main
         className={cn(
@@ -14,7 +16,7 @@ export default function DashboardLayout() {
           !isAdmin && "flex flex-col items-stretch",
         )}
       >
-        <div className={cn(!isAdmin && "w-full max-w-3xl mx-auto flex-1")}>
+        <div className="w-full flex-1">
           <Outlet />
         </div>
       </main>

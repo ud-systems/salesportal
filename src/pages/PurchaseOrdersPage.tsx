@@ -7,8 +7,11 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDisplayDate, formatOrderMoney } from "@/lib/format";
+import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 export default function PurchaseOrdersPage() {
+  const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -150,9 +153,11 @@ export default function PurchaseOrdersPage() {
                   <td className="py-3 font-medium text-foreground">{po.po_number}</td>
                   <td className="py-3 text-muted-foreground">{po.supplier_name || "—"}</td>
                   <td className="py-3 text-muted-foreground capitalize">{po.status || "draft"}</td>
-                  <td className="py-3 text-right text-foreground">${Number(po.total_amount || 0).toLocaleString()}</td>
-                  <td className="py-3 text-muted-foreground">{po.po_date ? new Date(po.po_date).toLocaleDateString() : "—"}</td>
-                  <td className="py-3 text-muted-foreground">{po.expected_date ? new Date(po.expected_date).toLocaleDateString() : "—"}</td>
+                  <td className="py-3 text-right text-foreground">
+                    {formatOrderMoney(Number(po.total_amount || 0), po.currency_code, storeCurrency)}
+                  </td>
+                  <td className="py-3 text-muted-foreground">{formatDisplayDate(po.po_date)}</td>
+                  <td className="py-3 text-muted-foreground">{formatDisplayDate(po.expected_date)}</td>
                 </tr>
               ))}
             </tbody>

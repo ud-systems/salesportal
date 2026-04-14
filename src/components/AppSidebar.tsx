@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, ShoppingCart, Package, Menu, X, LogOut, UserCheck, RefreshCw, Boxes, Settings, FolderTree, ClipboardList, UserCircle, RadioTower } from "lucide-react";
+import { LayoutDashboard, Users, ShoppingCart, Package, Menu, X, LogOut, UserCheck, RefreshCw, Boxes, Settings, FolderTree, ClipboardList, UserCircle, RadioTower, BarChart3 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -8,17 +8,17 @@ import { useNavigate } from "react-router-dom";
 
 const salespersonNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Profile", url: "/profile", icon: UserCircle },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Orders", url: "/orders", icon: ShoppingCart },
   { title: "Products", url: "/products", icon: Package },
-  { title: "Collections", url: "/collections", icon: FolderTree },
-  { title: "Purchase Orders", url: "/purchase-orders", icon: ClipboardList },
   { title: "Inventory", url: "/inventory", icon: Boxes },
 ];
 
 const adminNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Orders", url: "/orders", icon: ShoppingCart },
   { title: "Products", url: "/products", icon: Package },

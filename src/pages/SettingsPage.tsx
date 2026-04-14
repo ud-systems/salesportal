@@ -20,6 +20,7 @@ import {
 type SettingsMap = Record<string, string>;
 
 const SETTINGS_KEYS = [
+  "shop_display_currency",
   "shopify_store_domain",
   "shopify_access_token",
   "shopify_client_id",
@@ -58,6 +59,7 @@ export default function SettingsPage() {
       .in("key", SETTINGS_KEYS);
 
     const map: SettingsMap = {
+      shop_display_currency: "GBP",
       sync_frequency: "manual",
       low_stock_threshold: "10",
       notify_sync_complete: "true",
@@ -144,7 +146,12 @@ export default function SettingsPage() {
         },
       });
 
-      const payload = data as { success?: boolean; error?: string; errors?: string; shop?: { name?: string } } | null;
+      const payload = data as {
+        success?: boolean;
+        error?: string;
+        errors?: string;
+        shop?: { name?: string; currencyCode?: string };
+      } | null;
       const parsed = parseEdgeFunctionErrorPayload(data, error);
       if (parsed) {
         setConnectionStatus("error");
@@ -160,6 +167,15 @@ export default function SettingsPage() {
 
       if (payload?.success) {
         setConnectionStatus("success");
+        const cur = (payload.shop?.currencyCode || "").trim().toUpperCase();
+        if (cur && /^[A-Z]{3}$/.test(cur)) {
+          updateSetting("shop_display_currency", cur);
+          const nowIso = new Date().toISOString();
+          await (supabase as any).from("app_settings").upsert(
+            { key: "shop_display_currency", value: cur, updated_at: nowIso },
+            { onConflict: "key" },
+          );
+        }
         toast.success(payload.shop?.name ? `Connected: ${payload.shop.name}` : "Shopify connection successful!");
       } else {
         setConnectionStatus("error");
@@ -285,6 +301,20 @@ export default function SettingsPage() {
             <p className="text-xs text-muted-foreground">
               Use the permanent{" "}
               <span className="font-medium text-foreground">.myshopify.com</span> hostname only — no https://
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Display currency</label>
+            <Input
+              placeholder="GBP"
+              maxLength={3}
+              className="uppercase font-mono max-w-[120px]"
+              value={(settings.shop_display_currency || "GBP").toUpperCase()}
+              onChange={(e) => updateSetting("shop_display_currency", e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3))}
+            />
+            <p className="text-xs text-muted-foreground">
+              ISO 4217 code for amounts in the app (e.g. GBP). Also refreshes when you run Test Connection successfully.
             </p>
           </div>
 

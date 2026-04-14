@@ -450,6 +450,9 @@ Deno.serve(async (req) => {
             tags
             vendor
             productType
+            featuredImage {
+              url
+            }
             variants(first: 100) {
               edges {
                 node {
@@ -469,6 +472,7 @@ Deno.serve(async (req) => {
       if (!p?.id) return null;
       const shopifyProductId = String(p.id).replace("gid://shopify/Product/", "");
       const productTags = Array.isArray(p.tags) ? p.tags.join(", ") : "";
+      const featuredUrl = p.featuredImage?.url || null;
       const { data: productRow, error: prodErr } = await supabase
         .from("shopify_products")
         .upsert({
@@ -480,6 +484,7 @@ Deno.serve(async (req) => {
           status: p.status || null,
           description_html: p.descriptionHtml || null,
           tags: productTags || null,
+          featured_image_url: featuredUrl,
         }, { onConflict: "shopify_product_id" })
         .select("id")
         .single();
@@ -508,15 +513,106 @@ Deno.serve(async (req) => {
       return productId;
     };
 
+    const notifyUsersForNewOrder = async (internalOrderId: string) => {
+      const { data: o } = await supabase
+        .from("shopify_orders")
+        .select("order_number, customer_name, total, currency_code, customer_id")
+        .eq("id", internalOrderId)
+        .maybeSingle();
+      if (!o) return;
+      const userIds = new Set<string>();
+      const { data: admins } = await supabase.from("user_roles").select("user_id").eq("role", "admin");
+      for (const r of admins || []) {
+        const id = (r as { user_id: string }).user_id;
+        if (id) userIds.add(id);
+      }
+      if (o.customer_id) {
+        const { data: assigns } = await supabase
+          .from("salesperson_customer_assignments")
+          .select("salesperson_user_id")
+          .eq("customer_id", o.customer_id);
+        for (const a of assigns || []) {
+          const id = (a as { salesperson_user_id: string }).salesperson_user_id;
+          if (id) userIds.add(id);
+        }
+      }
+      const orderLabel = String(o.order_number || internalOrderId);
+      const amt = Number(o.total || 0);
+      const cur = o.currency_code || "";
+      const body = `${orderLabel} · ${o.customer_name || "Customer"} · ${amt} ${cur}`.trim();
+      for (const user_id of userIds) {
+        const { error } = await supabase.from("user_notifications").insert({
+          user_id,
+          type: "new_order",
+          title: "New order",
+          body,
+          entity_type: "order",
+          entity_id: internalOrderId,
+          payload: {
+            order_number: orderLabel,
+            total: amt,
+            currency_code: o.currency_code,
+          },
+        });
+        const code = (error as { code?: string } | null)?.code;
+        if (error && code !== "23505") console.error("user_notifications order:", error.message);
+      }
+    };
+
+    const notifyUsersForNewCustomer = async (internalCustomerId: string) => {
+      const { data: c } = await supabase
+        .from("shopify_customers")
+        .select("name, email")
+        .eq("id", internalCustomerId)
+        .maybeSingle();
+      if (!c) return;
+      const userIds = new Set<string>();
+      const { data: admins } = await supabase.from("user_roles").select("user_id").eq("role", "admin");
+      for (const r of admins || []) {
+        const id = (r as { user_id: string }).user_id;
+        if (id) userIds.add(id);
+      }
+      const { data: assigns } = await supabase
+        .from("salesperson_customer_assignments")
+        .select("salesperson_user_id")
+        .eq("customer_id", internalCustomerId);
+      for (const a of assigns || []) {
+        const id = (a as { salesperson_user_id: string }).salesperson_user_id;
+        if (id) userIds.add(id);
+      }
+      const body = `${c.name}${c.email ? ` · ${c.email}` : ""}`.trim();
+      for (const user_id of userIds) {
+        const { error } = await supabase.from("user_notifications").insert({
+          user_id,
+          type: "new_customer",
+          title: "New customer",
+          body,
+          entity_type: "customer",
+          entity_id: internalCustomerId,
+          payload: { name: c.name, email: c.email },
+        });
+        const code = (error as { code?: string } | null)?.code;
+        if (error && code !== "23505") console.error("user_notifications customer:", error.message);
+      }
+    };
+
     try {
       if (topic === "customers/create" || topic === "customers/update") {
         const customerGid = String(payload.admin_graphql_api_id || "");
-        if (customerGid) await upsertCustomerByGid(customerGid);
-        else await markDone("ignored", "customer webhook missing admin_graphql_api_id");
+        if (customerGid) {
+          const customerId = await upsertCustomerByGid(customerGid);
+          if (topic === "customers/create" && customerId) {
+            await notifyUsersForNewCustomer(customerId);
+          }
+        } else await markDone("ignored", "customer webhook missing admin_graphql_api_id");
       } else if (topic === "orders/create" || topic === "orders/updated") {
         const orderGid = String(payload.admin_graphql_api_id || "");
-        if (orderGid) await upsertOrderByGid(orderGid);
-        else await markDone("ignored", "order webhook missing admin_graphql_api_id");
+        if (orderGid) {
+          const orderId = await upsertOrderByGid(orderGid);
+          if (topic === "orders/create" && orderId) {
+            await notifyUsersForNewOrder(orderId);
+          }
+        } else await markDone("ignored", "order webhook missing admin_graphql_api_id");
       } else if (topic === "products/create" || topic === "products/update") {
         const productGid = String(payload.admin_graphql_api_id || "");
         if (productGid) await upsertProductByGid(productGid);

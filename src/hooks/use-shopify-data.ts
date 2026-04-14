@@ -125,9 +125,9 @@ export function useOrders() {
   });
 }
 
-export function useOrdersCount() {
+export function useOrdersCount(scopeKey = "global") {
   return useQuery({
-    queryKey: ["shopify-orders-count"],
+    queryKey: ["shopify-orders-count", scopeKey],
     queryFn: async () => {
       const { count, error } = await supabase
         .from("shopify_orders")
@@ -139,9 +139,9 @@ export function useOrdersCount() {
   });
 }
 
-export function useCustomersCount() {
+export function useCustomersCount(scopeKey = "global") {
   return useQuery({
-    queryKey: ["shopify-customers-count"],
+    queryKey: ["shopify-customers-count", scopeKey],
     queryFn: async () => {
       const { count, error } = await supabase
         .from("shopify_customers")
@@ -153,9 +153,9 @@ export function useCustomersCount() {
   });
 }
 
-export function useTopCustomers(limit = 3) {
+export function useTopCustomers(limit = 3, scopeKey = "global") {
   return useQuery({
-    queryKey: ["shopify-top-customers", limit],
+    queryKey: ["shopify-top-customers", limit, scopeKey],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("shopify_customers")
@@ -184,13 +184,15 @@ export function useUnfulfilledOrdersCount() {
   });
 }
 
-export function useRecentOrders(limit = 10) {
+export function useRecentOrders(limit = 10, scopeKey = "global") {
   return useQuery({
-    queryKey: ["shopify-recent-orders", limit],
+    queryKey: ["shopify-recent-orders", limit, scopeKey],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("shopify_orders")
-        .select("id, order_number, shopify_order_id, customer_name, total, financial_status, fulfillment_status, shopify_created_at, created_at")
+        .select(
+          "id, order_number, shopify_order_id, customer_name, total, currency_code, financial_status, fulfillment_status, shopify_created_at, created_at",
+        )
         .order("shopify_created_at", { ascending: false, nullsFirst: false })
         .limit(limit);
       if (error) throw error;
@@ -200,19 +202,26 @@ export function useRecentOrders(limit = 10) {
   });
 }
 
-export function useRevenueByMonthForYear(year?: number) {
+export function useRevenueByMonthForYear(year?: number, scopeKey = "global") {
   const activeYear = year ?? new Date().getUTCFullYear();
   return useQuery({
-    queryKey: ["shopify-revenue-by-month", activeYear],
+    queryKey: ["shopify-revenue-by-month", activeYear, scopeKey],
     queryFn: async () => {
-      const start = `${activeYear}-01-01T00:00:00.000Z`;
-      const end = `${activeYear}-12-31T23:59:59.999Z`;
-      const { data, error } = await supabase
-        .from("shopify_orders")
-        .select("shopify_created_at, created_at, total")
-        .gte("shopify_created_at", start)
-        .lte("shopify_created_at", end);
-      if (error) throw error;
+      const pageSize = 1000;
+      let offset = 0;
+      const rows: { shopify_created_at: string | null; created_at: string | null; total: number | null }[] = [];
+      while (true) {
+        const to = offset + pageSize - 1;
+        const { data, error } = await supabase
+          .from("shopify_orders")
+          .select("shopify_created_at, created_at, total")
+          .range(offset, to);
+        if (error) throw error;
+        const batch = data ?? [];
+        rows.push(...(batch as typeof rows));
+        if (batch.length < pageSize) break;
+        offset += pageSize;
+      }
 
       const months = Array.from({ length: 12 }, (_, i) => ({
         monthIdx: i,
@@ -222,10 +231,12 @@ export function useRevenueByMonthForYear(year?: number) {
         year: activeYear,
       }));
 
-      for (const row of data ?? []) {
+      for (const row of rows) {
         const d = row.shopify_created_at || row.created_at;
         if (!d) continue;
-        const idx = new Date(d).getUTCMonth();
+        const parsed = new Date(d);
+        if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() !== activeYear) continue;
+        const idx = parsed.getUTCMonth();
         months[idx].revenue += Number(row.total || 0);
         months[idx].orders += 1;
       }
@@ -235,9 +246,9 @@ export function useRevenueByMonthForYear(year?: number) {
   });
 }
 
-export function useOrdersTotalRevenue() {
+export function useOrdersTotalRevenue(scopeKey = "global") {
   return useQuery({
-    queryKey: ["shopify-orders-total-revenue"],
+    queryKey: ["shopify-orders-total-revenue", scopeKey],
     queryFn: async () => {
       const pageSize = 1000;
       let from = 0;
@@ -257,6 +268,156 @@ export function useOrdersTotalRevenue() {
       return total;
     },
     staleTime: 60_000,
+  });
+}
+
+async function paginateOrderTotalsFiltered(
+  fromIso?: string | null,
+  toIso?: string | null,
+): Promise<{ revenue: number; count: number }> {
+  const pageSize = 1000;
+  let offset = 0;
+  let revenue = 0;
+  let count = 0;
+  while (true) {
+    let q = supabase.from("shopify_orders").select("total");
+    if (fromIso) q = q.gte("shopify_created_at", fromIso);
+    if (toIso) q = q.lte("shopify_created_at", toIso);
+    const to = offset + pageSize - 1;
+    const { data, error } = await q.range(offset, to);
+    if (error) throw error;
+    const batch = data ?? [];
+    count += batch.length;
+    for (const row of batch) revenue += Number((row as { total?: number }).total || 0);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+  return { revenue, count };
+}
+
+export function useOrdersMetricsInRange(
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["shopify-orders-metrics-range", fromIso ?? "none", toIso ?? "none", scopeKey],
+    queryFn: () => paginateOrderTotalsFiltered(fromIso || undefined, toIso || undefined),
+    staleTime: 60_000,
+    enabled: enabled && Boolean(fromIso && toIso),
+  });
+}
+
+export function useCustomersCountInRange(
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["shopify-customers-count-range", fromIso ?? "none", toIso ?? "none", scopeKey],
+    queryFn: async () => {
+      let q = supabase.from("shopify_customers").select("id", { count: "exact", head: true });
+      if (fromIso) q = q.gte("shopify_created_at", fromIso);
+      if (toIso) q = q.lte("shopify_created_at", toIso);
+      const { count, error } = await q;
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(fromIso && toIso),
+  });
+}
+
+export type TimeseriesBucket = "day" | "month";
+
+export function useOrdersTimeseriesInRange(
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  bucket: TimeseriesBucket,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["shopify-orders-timeseries", fromIso ?? "none", toIso ?? "none", bucket, scopeKey],
+    queryFn: async () => {
+      const pageSize = 1000;
+      let offset = 0;
+      const rows: { shopify_created_at: string | null; created_at: string | null; total: number | null }[] = [];
+      while (true) {
+        let q = supabase.from("shopify_orders").select("shopify_created_at, created_at, total");
+        if (fromIso) q = q.gte("shopify_created_at", fromIso);
+        if (toIso) q = q.lte("shopify_created_at", toIso);
+        const to = offset + pageSize - 1;
+        const { data, error } = await q.range(offset, to);
+        if (error) throw error;
+        const batch = data ?? [];
+        rows.push(...(batch as typeof rows));
+        if (batch.length < pageSize) break;
+        offset += pageSize;
+      }
+      const map = new Map<string, { revenue: number; orders: number; label: string; sortKey: string }>();
+      for (const row of rows) {
+        const d = row.shopify_created_at || row.created_at;
+        if (!d) continue;
+        const date = new Date(d);
+        let key: string;
+        let label: string;
+        if (bucket === "day") {
+          key = date.toISOString().slice(0, 10);
+          label = new Date(key + "T12:00:00Z").toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+            timeZone: "UTC",
+          });
+        } else {
+          key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+          label = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toLocaleDateString("en-GB", {
+            month: "short",
+            year: "numeric",
+            timeZone: "UTC",
+          });
+        }
+        const prev = map.get(key) || { revenue: 0, orders: 0, label, sortKey: key };
+        prev.revenue += Number(row.total || 0);
+        prev.orders += 1;
+        map.set(key, prev);
+      }
+      return Array.from(map.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([, v]) => ({ label: v.label, revenue: v.revenue, orders: v.orders }));
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(fromIso && toIso),
+  });
+}
+
+export function useRecentOrdersInRange(
+  limit: number,
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["shopify-recent-orders-range", limit, fromIso ?? "none", toIso ?? "none", scopeKey],
+    queryFn: async () => {
+      let q = supabase
+        .from("shopify_orders")
+        .select(
+          "id, order_number, shopify_order_id, customer_name, total, currency_code, financial_status, fulfillment_status, shopify_created_at, created_at",
+        )
+        .order("shopify_created_at", { ascending: false, nullsFirst: false })
+        .limit(limit);
+      if (fromIso) q = q.gte("shopify_created_at", fromIso);
+      if (toIso) q = q.lte("shopify_created_at", toIso);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 30_000,
+    enabled: enabled && Boolean(fromIso && toIso),
   });
 }
 

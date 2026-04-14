@@ -251,6 +251,7 @@ export type Database = {
           category: string | null
           created_at: string | null
           description_html: string | null
+          featured_image_url: string | null
           handle: string | null
           id: string
           shopify_product_id: string
@@ -264,6 +265,7 @@ export type Database = {
           category?: string | null
           created_at?: string | null
           description_html?: string | null
+          featured_image_url?: string | null
           handle?: string | null
           id?: string
           shopify_product_id: string
@@ -277,6 +279,7 @@ export type Database = {
           category?: string | null
           created_at?: string | null
           description_html?: string | null
+          featured_image_url?: string | null
           handle?: string | null
           id?: string
           shopify_product_id?: string
@@ -528,6 +531,45 @@ export type Database = {
           role?: Database["public"]["Enums"]["app_role"]
           salesperson_name?: string | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_notifications: {
+        Row: {
+          id: string
+          user_id: string
+          type: string
+          title: string
+          body: string | null
+          entity_type: string | null
+          entity_id: string | null
+          payload: Json | null
+          read_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          type: string
+          title: string
+          body?: string | null
+          entity_type?: string | null
+          entity_id?: string | null
+          payload?: Json | null
+          read_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          type?: string
+          title?: string
+          body?: string | null
+          entity_type?: string | null
+          entity_id?: string | null
+          payload?: Json | null
+          read_at?: string | null
+          created_at?: string
         }
         Relationships: []
       }

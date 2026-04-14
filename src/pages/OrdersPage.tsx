@@ -10,8 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchParams } from "react-router-dom";
+import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
+import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 export default function OrdersPage() {
+  const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [searchParams] = useSearchParams();
   const initialFulfillment = (() => {
     const val = searchParams.get("fulfillment");
@@ -178,10 +181,12 @@ export default function OrdersPage() {
                     <tr key={o.id} onClick={() => setSelectedOrder(o)} className="border-b last:border-0 hover:bg-muted/50 transition-colors cursor-pointer">
                       <td className="py-3 font-medium text-foreground">{o.order_number || o.shopify_order_id}</td>
                       <td className="py-3 text-muted-foreground">{o.customer_name}</td>
-                      <td className="py-3 text-right font-medium text-foreground">${Number(o.total).toLocaleString()}</td>
+                      <td className="py-3 text-right font-medium text-foreground">
+                        {formatOrderMoney(Number(o.total), o.currency_code, storeCurrency)}
+                      </td>
                       <td className="py-3"><StatusBadge status={(o.financial_status || "pending") as any} /></td>
                       <td className="py-3"><StatusBadge status={(o.fulfillment_status || "unfulfilled") as any} /></td>
-                      <td className="py-3 text-muted-foreground">{o.shopify_created_at ? new Date(o.shopify_created_at).toLocaleDateString() : "—"}</td>
+                      <td className="py-3 text-muted-foreground">{formatDisplayDate(o.shopify_created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -194,12 +199,14 @@ export default function OrdersPage() {
               <div key={o.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
                 <div className="flex items-start justify-between mb-2">
                   <div><p className="font-medium text-foreground text-sm">{o.order_number || o.shopify_order_id}</p><p className="text-xs text-muted-foreground mt-0.5">{o.customer_name}</p></div>
-                  <p className="font-heading font-bold text-foreground">${Number(o.total).toLocaleString()}</p>
+                  <p className="font-heading font-bold text-foreground">
+                    {formatOrderMoney(Number(o.total), o.currency_code, storeCurrency)}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
                   <StatusBadge status={(o.financial_status || "pending") as any} />
                   <StatusBadge status={(o.fulfillment_status || "unfulfilled") as any} />
-                  <span className="text-xs text-muted-foreground ml-auto font-body">{o.shopify_created_at ? new Date(o.shopify_created_at).toLocaleDateString() : ""}</span>
+                  <span className="text-xs text-muted-foreground ml-auto font-body">{formatDisplayDate(o.shopify_created_at)}</span>
                 </div>
               </div>
             ))}
@@ -247,15 +254,15 @@ export default function OrdersPage() {
                 <p className="text-muted-foreground">{selectedOrder.customer_name || "Unknown customer"} · {selectedOrder.email || "No email"}</p>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Total</p><p className="font-semibold">${Number(selectedOrder.total || 0).toLocaleString()}</p></div>
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Subtotal</p><p className="font-semibold">${Number(selectedOrder.subtotal || 0).toLocaleString()}</p></div>
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Tax</p><p className="font-semibold">${Number(selectedOrder.total_tax || 0).toLocaleString()}</p></div>
+                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Total</p><p className="font-semibold">{formatOrderMoney(Number(selectedOrder.total || 0), selectedOrder.currency_code, storeCurrency)}</p></div>
+                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Subtotal</p><p className="font-semibold">{formatOrderMoney(Number(selectedOrder.subtotal || 0), selectedOrder.currency_code, storeCurrency)}</p></div>
+                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Tax</p><p className="font-semibold">{formatOrderMoney(Number(selectedOrder.total_tax || 0), selectedOrder.currency_code, storeCurrency)}</p></div>
               </div>
               <div className="rounded-xl border p-4 space-y-2">
                 <p><span className="text-muted-foreground">Currency:</span> {selectedOrder.currency_code || "—"}</p>
                 <p><span className="text-muted-foreground">Payment:</span> {selectedOrder.financial_status || "—"}</p>
                 <p><span className="text-muted-foreground">Fulfillment:</span> {selectedOrder.fulfillment_status || "—"}</p>
-                <p><span className="text-muted-foreground">Processed:</span> {selectedOrder.processed_at ? new Date(selectedOrder.processed_at).toLocaleString() : "—"}</p>
+                <p><span className="text-muted-foreground">Processed:</span> {formatDisplayDateTime(selectedOrder.processed_at)}</p>
                 <p><span className="text-muted-foreground">Tags:</span> {selectedOrder.tags || "—"}</p>
                 <p><span className="text-muted-foreground">Note:</span> {selectedOrder.order_note || "—"}</p>
               </div>
@@ -272,7 +279,7 @@ export default function OrdersPage() {
                       </div>
                       <div className="text-right">
                         <p className="text-foreground">x{item.quantity || 0}</p>
-                        <p className="text-muted-foreground">${Number(item.price || 0).toLocaleString()}</p>
+                        <p className="text-muted-foreground">{formatOrderMoney(Number(item.price || 0), selectedOrder.currency_code, storeCurrency)}</p>
                       </div>
                     </div>
                   ))

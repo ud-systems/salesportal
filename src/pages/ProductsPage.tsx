@@ -9,8 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatOrderMoney } from "@/lib/format";
+import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 export default function ProductsPage() {
+  const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [stockFilter, setStockFilter] = useState("all");
@@ -188,8 +191,12 @@ export default function ProductsPage() {
           {filtered.map((product: any, i: number) => (
             <div key={product.id} onClick={() => setSelectedProduct(product)} className="card-float p-5 opacity-0 animate-fade-in cursor-pointer" style={{ animationDelay: `${50 + i * 80}ms` }}>
               <div className="flex items-start gap-3 mb-4">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <Package className="h-5 w-5 text-primary" />
+                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+                  {product.featured_image_url ? (
+                    <img src={product.featured_image_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <Package className="h-5 w-5 text-primary" />
+                  )}
                 </div>
                 <div>
                   <h3 className="font-heading font-semibold text-foreground">{product.title}</h3>
@@ -205,7 +212,7 @@ export default function ProductsPage() {
                       {v.sku && <span className="text-muted-foreground ml-2">SKU: {v.sku}</span>}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-medium text-foreground">${Number(v.price || 0)}</span>
+                      <span className="font-medium text-foreground">{formatOrderMoney(Number(v.price || 0), null, storeCurrency)}</span>
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${
                         (v.stock || 0) <= 10 ? "bg-destructive/10 text-destructive" : (v.stock || 0) <= 50 ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary"
                       }`}>
@@ -257,8 +264,12 @@ export default function ProductsPage() {
                       </TableCell>
                       <TableCell className="py-3">
                         <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                            <Package className="h-4 w-4 text-primary" />
+                          <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+                            {product.featured_image_url ? (
+                              <img src={product.featured_image_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+                            ) : (
+                              <Package className="h-4 w-4 text-primary" />
+                            )}
                           </div>
                           <div>
                             <p className="font-medium text-foreground">{product.title}</p>
@@ -280,8 +291,8 @@ export default function ProductsPage() {
                       </TableCell>
                       <TableCell className="py-3 text-foreground">
                         {stats.minPrice === stats.maxPrice
-                          ? `$${stats.minPrice.toFixed(2)}`
-                          : `$${stats.minPrice.toFixed(2)} - $${stats.maxPrice.toFixed(2)}`}
+                          ? formatOrderMoney(stats.minPrice, null, storeCurrency)
+                          : `${formatOrderMoney(stats.minPrice, null, storeCurrency)} – ${formatOrderMoney(stats.maxPrice, null, storeCurrency)}`}
                       </TableCell>
                     </TableRow>
                     {isExpanded && (
@@ -296,7 +307,7 @@ export default function ProductsPage() {
                                     <p className="font-medium text-foreground truncate">{v.title || "Default"}</p>
                                     <p className="text-xs text-muted-foreground truncate">{v.sku || "No SKU"}</p>
                                   </div>
-                                  <div className="text-foreground font-medium">${Number(v.price || 0).toFixed(2)}</div>
+                                  <div className="text-foreground font-medium">{formatOrderMoney(Number(v.price || 0), null, storeCurrency)}</div>
                                   <div>
                                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${stockBadgeClass(Number(v.stock || 0))}`}>
                                       {Number(v.stock || 0)} in stock
@@ -357,8 +368,12 @@ export default function ProductsPage() {
             <div className="space-y-4 mt-4 font-body text-sm">
               <div className="rounded-xl border bg-card p-4">
                 <div className="flex items-start gap-3">
-                  <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-                    <ImageIcon className="h-5 w-5 text-primary" />
+                  <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
+                    {selectedProduct.featured_image_url ? (
+                      <img src={selectedProduct.featured_image_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    ) : (
+                      <ImageIcon className="h-5 w-5 text-primary" />
+                    )}
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-foreground">{selectedProduct.title}</p>
@@ -388,7 +403,7 @@ export default function ProductsPage() {
                       <p className="text-xs text-muted-foreground">{v.sku || "No SKU"} {v.inventory_location ? `· ${v.inventory_location}` : ""}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-foreground font-medium">${Number(v.price || 0)}</p>
+                      <p className="text-foreground font-medium">{formatOrderMoney(Number(v.price || 0), null, storeCurrency)}</p>
                       <p className="text-xs text-muted-foreground">{v.stock || 0} in stock</p>
                     </div>
                   </div>

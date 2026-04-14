@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDisplayDate } from "@/lib/format";
 
 export default function CollectionsPage() {
   const [search, setSearch] = useState("");
@@ -121,7 +122,7 @@ export default function CollectionsPage() {
                   <td className="py-3 text-muted-foreground">{c.handle || "—"}</td>
                   <td className="py-3 text-right text-foreground">{c.products_count ?? 0}</td>
                   <td className="py-3 text-muted-foreground">{c.collection_type || "custom"}</td>
-                  <td className="py-3 text-muted-foreground">{c.updated_at ? new Date(c.updated_at).toLocaleDateString() : "—"}</td>
+                  <td className="py-3 text-muted-foreground">{formatDisplayDate(c.updated_at)}</td>
                 </tr>
               ))}
             </tbody>

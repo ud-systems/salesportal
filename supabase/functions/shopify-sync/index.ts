@@ -830,6 +830,9 @@ Deno.serve(async (req) => {
               vendor
               productType
               updatedAt
+              featuredImage {
+                url
+              }
               variants(first: ${PRODUCT_VARIANT_PAGE_SIZE}) {
                 edges {
                   node {
@@ -887,6 +890,7 @@ Deno.serve(async (req) => {
         const shopifyProductId = p.id.replace("gid://shopify/Product/", "");
         const productTags = Array.isArray(p.tags) ? p.tags.join(", ") : "";
 
+        const featuredUrl = p.featuredImage?.url || null;
         const { data: prodRows, error: prodErr } = await supabase.from("shopify_products").upsert({
           shopify_product_id: shopifyProductId,
           title: p.title,
@@ -896,6 +900,7 @@ Deno.serve(async (req) => {
           status: p.status || null,
           description_html: p.descriptionHtml || null,
           tags: productTags || null,
+          featured_image_url: featuredUrl,
         }, { onConflict: "shopify_product_id" }).select("id");
 
         if (prodErr) throw prodErr;

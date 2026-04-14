@@ -2,6 +2,8 @@ import { useCustomers } from "@/hooks/use-shopify-data";
 import { Users, DollarSign } from "lucide-react";
 import { useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatOrderMoney } from "@/lib/format";
+import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 function initials(name: string) {
   return name
@@ -12,6 +14,7 @@ function initials(name: string) {
 }
 
 export default function SalespersonsPage() {
+  const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const { data: customers, isLoading } = useCustomers();
 
   // Derive salesperson summaries from customers (admin sees all)
@@ -85,7 +88,7 @@ export default function SalespersonsPage() {
                         </div>
                       </td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.customers}</td>
-                      <td className="py-3 text-right font-medium text-foreground">${Number(sp.revenue).toLocaleString()}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.revenue), null, storeCurrency)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -112,7 +115,7 @@ export default function SalespersonsPage() {
                   </div>
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <DollarSign className="h-4 w-4 text-primary mx-auto mb-1" />
-                    <p className="text-lg font-heading font-bold text-foreground">${(sp.revenue / 1000).toFixed(0)}k</p>
+                    <p className="text-lg font-heading font-bold text-foreground">{formatOrderMoney(Number(sp.revenue), null, storeCurrency)}</p>
                     <p className="text-[10px] text-muted-foreground font-body">Revenue</p>
                   </div>
                 </div>

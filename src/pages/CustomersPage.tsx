@@ -13,8 +13,11 @@ import { cn } from "@/lib/utils";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatOrderMoney } from "@/lib/format";
+import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 export default function CustomersPage() {
+  const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
@@ -247,7 +250,9 @@ export default function CustomersPage() {
                         </td>
                       )}
                       <td className="py-3 text-right font-medium text-foreground">{c.total_orders || 0}</td>
-                      <td className="py-3 text-right font-medium text-foreground">${Number(c.total_revenue || 0).toLocaleString()}</td>
+                      <td className="py-3 text-right font-medium text-foreground">
+                        {formatOrderMoney(Number(c.total_revenue || 0), c.spend_currency, storeCurrency)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -274,7 +279,9 @@ export default function CustomersPage() {
                 )}
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground font-body">{c.total_orders || 0} orders</span>
-                  <span className="font-medium text-foreground font-body">${Number(c.total_revenue || 0).toLocaleString()}</span>
+                  <span className="font-medium text-foreground font-body">
+                    {formatOrderMoney(Number(c.total_revenue || 0), c.spend_currency, storeCurrency)}
+                  </span>
                 </div>
               </div>
             ))}
@@ -344,7 +351,7 @@ export default function CustomersPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Orders</p><p className="font-semibold">{selectedCustomer.total_orders || 0}</p></div>
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-semibold">${Number(selectedCustomer.total_revenue || 0).toLocaleString()}</p></div>
+                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-semibold">{formatOrderMoney(Number(selectedCustomer.total_revenue || 0), selectedCustomer.spend_currency, storeCurrency)}</p></div>
               </div>
               <div className="rounded-xl border p-4 space-y-2">
                 <p><span className="text-muted-foreground">Store:</span> {selectedCustomer.store_name || "—"}</p>
