@@ -5,6 +5,17 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const salespersonNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -92,10 +103,10 @@ export function AppSidebar() {
         <div className="flex items-center justify-between p-5 pb-2">
           <div className="flex items-center gap-2.5">
             <div className="h-9 w-9 rounded-xl gradient-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-heading font-bold text-sm">UD</span>
+              <img src="/white logo.png" alt="Logo" className="h-5 w-5 object-contain" />
             </div>
             <div>
-              <h1 className="font-heading font-bold text-base text-foreground leading-tight">UD Sales</h1>
+              <h1 className="font-heading font-bold text-base text-foreground leading-tight">Sales Portal</h1>
               <p className="text-[11px] text-muted-foreground font-body">Sales Portal</p>
             </div>
           </div>
@@ -147,9 +158,27 @@ export function AppSidebar() {
               <p className="text-sm font-medium font-body text-foreground truncate">{user?.name}</p>
               <p className="text-[11px] text-muted-foreground font-body capitalize">{user?.role}</p>
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={handleLogout}>
-              <LogOut className="h-4 w-4" />
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent className="rounded-xl">
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="font-heading text-base">Sign out now?</AlertDialogTitle>
+                  <AlertDialogDescription className="font-body text-sm">
+                    You will be logged out of this session and returned to the login page.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="rounded-xl font-body">Cancel</AlertDialogCancel>
+                  <AlertDialogAction className="rounded-xl font-body" onClick={() => void handleLogout()}>
+                    Sign out
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </aside>

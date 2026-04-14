@@ -101,7 +101,13 @@ export default function DashboardPage() {
 
   const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
 
-  const revenueDataAll = useMemo(() => (monthlyRevenue || []).slice(-6), [monthlyRevenue]);
+  const revenueDataAll = useMemo(() => {
+    const months = monthlyRevenue || [];
+    const nonZeroMonths = months.filter((m) => Number(m.revenue || 0) > 0 || Number(m.orders || 0) > 0);
+    if (nonZeroMonths.length >= 6) return nonZeroMonths.slice(-6);
+    if (nonZeroMonths.length > 0) return nonZeroMonths;
+    return months.slice(-6);
+  }, [monthlyRevenue]);
 
   const chartData = useMemo(() => {
     if (isAll) {
@@ -113,6 +119,10 @@ export default function DashboardPage() {
     }
     return seriesRange.map((p) => ({ label: p.label, revenue: p.revenue, orders: p.orders }));
   }, [isAll, revenueDataAll, seriesRange]);
+  const hasChartData = useMemo(
+    () => chartData.some((point) => Number(point.revenue || 0) > 0 || Number(point.orders || 0) > 0),
+    [chartData],
+  );
 
   const loadingChart = isAll ? loadingRevenueByMonth : loadingSeries;
 
@@ -234,7 +244,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
         {loadingChart ? (
           <>
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
@@ -246,56 +256,96 @@ export default function DashboardPage() {
               <Skeleton className="h-[220px] w-full rounded-xl" />
             </div>
           </>
-        ) : chartData.length > 0 ? (
+        ) : hasChartData ? (
+          <>
+            <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
+              <div className="flex-1 min-h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    margin={{ top: 6, right: 0, left: 0, bottom: 0 }}
+                    barCategoryGap="8%"
+                    barGap={0}
+                    maxBarSize={40}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis
+                      dataKey="label"
+                      padding={{ left: 0, right: 0 }}
+                      tick={{ fontSize: 11 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      width={48}
+                      tick={{ fontSize: 11 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      tickFormatter={(v) => formatCompactMoney(Number(v), currency)}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid hsl(var(--border))",
+                        fontSize: 13,
+                      }}
+                      formatter={(value: number) => [formatOrderMoney(value, null, currency), "Revenue"]}
+                    />
+                    <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
+              <div className="flex-1 min-h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                    <XAxis
+                      dataKey="label"
+                      padding={{ left: 0, right: 0 }}
+                      tick={{ fontSize: 11 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      width={44}
+                      tick={{ fontSize: 11 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} />
+                    <Area
+                      type="monotone"
+                      dataKey="orders"
+                      stroke="hsl(var(--primary))"
+                      fill="hsl(var(--primary) / 0.15)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </>
+        ) : (
           <>
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
               <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 11 }}
-                    stroke="hsl(var(--muted-foreground))"
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11 }}
-                    stroke="hsl(var(--muted-foreground))"
-                    tickFormatter={(v) => formatCompactMoney(v, currency)}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: 12,
-                      border: "1px solid hsl(var(--border))",
-                      fontSize: 13,
-                    }}
-                    formatter={(value: number) => [formatOrderMoney(value, null, currency), "Revenue"]}
-                  />
-                  <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <p className="text-muted-foreground text-sm font-body py-12 text-center">No revenue data in this period.</p>
             </div>
-
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
               <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} />
-                  <Area
-                    type="monotone"
-                    dataKey="orders"
-                    stroke="hsl(var(--primary))"
-                    fill="hsl(var(--primary) / 0.15)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <p className="text-muted-foreground text-sm font-body py-12 text-center">No order data in this period.</p>
             </div>
           </>
-        ) : null}
+        )}
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "350ms" }}>

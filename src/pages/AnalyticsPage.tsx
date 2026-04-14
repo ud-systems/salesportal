@@ -204,7 +204,7 @@ export default function AnalyticsPage() {
       const wide = columns.length > 6;
       const doc = new jsPDF({ unit: "mm", format: "a4", orientation: wide ? "landscape" : "portrait" });
       doc.setFontSize(15);
-      doc.text("UD Sales — " + selectedDef.title, 14, 16);
+      doc.text("Sales Portal — " + selectedDef.title, 14, 16);
       doc.setFontSize(9);
       doc.setTextColor(90);
       doc.text(periodSubtitle, 14, 22);
