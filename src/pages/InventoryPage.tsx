@@ -57,7 +57,7 @@ export default function InventoryPage() {
   }, [filtered]);
 
   return (
-    <div className="space-y-5 max-w-[1200px]">
+    <div className="w-full space-y-5">
       <div className="opacity-0 animate-fade-in">
         <h1 className="text-2xl lg:text-3xl font-heading font-bold text-foreground">Inventory</h1>
         <p className="text-muted-foreground font-body text-sm mt-1">Stock levels across locations</p>

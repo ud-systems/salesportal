@@ -10,7 +10,7 @@ export default function ProfilePage() {
   if (!user) return null;
 
   return (
-    <div className="w-full max-w-lg mx-auto space-y-6 px-1">
+    <div className="w-full space-y-6 px-1">
       <div className="text-center opacity-0 animate-fade-in">
         <div className="h-20 w-20 rounded-2xl gradient-primary flex items-center justify-center mx-auto mb-4 shadow-lg">
           <span className="text-primary-foreground text-2xl font-heading font-bold">{user.initials}</span>

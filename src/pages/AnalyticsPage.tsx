@@ -385,7 +385,7 @@ export default function AnalyticsPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-[1200px]">
+    <div className="w-full space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 opacity-0 animate-fade-in">
         <div>
           <div className="flex items-center gap-2">

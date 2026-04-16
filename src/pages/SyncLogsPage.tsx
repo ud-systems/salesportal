@@ -159,7 +159,7 @@ export default function SyncLogsPage() {
   };
 
   return (
-    <div className="space-y-5 max-w-[1200px]">
+    <div className="w-full space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between opacity-0 animate-fade-in">
         <div>
           <h1 className="text-2xl lg:text-3xl font-heading font-bold text-foreground">Sync Logs</h1>

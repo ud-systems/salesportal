@@ -203,7 +203,7 @@ export default function AdminDashboardPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-[1200px]">
+    <div className="w-full space-y-6">
       <div className="opacity-0 animate-fade-in">
         <h1 className="text-2xl lg:text-3xl font-heading font-bold text-foreground">Admin Dashboard</h1>
         <p className="text-muted-foreground font-body text-sm mt-1">Organization-wide overview</p>
