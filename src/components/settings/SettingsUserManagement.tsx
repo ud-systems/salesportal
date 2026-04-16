@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -25,7 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { BottomSheet } from "@/components/BottomSheet";
 import { toast } from "sonner";
-import { Loader2, Pencil, Plus, Trash2, UserCog, Eye, EyeOff } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, UserCog, Eye, EyeOff, Network } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,7 @@ export type ListedAppUser = {
   email: string | null;
   full_name: string;
   created_at: string;
-  role: "admin" | "salesperson" | null;
+  role: "admin" | "supervisor" | "manager" | "salesperson" | null;
   salesperson_name: string | null;
   has_role_row: boolean;
 };
@@ -74,8 +75,19 @@ type FormState = {
   email: string;
   password: string;
   full_name: string;
-  role: "admin" | "salesperson";
+  role: "admin" | "supervisor" | "manager" | "salesperson";
   salesperson_name: string;
+};
+
+type HierarchyEdge = {
+  leader_user_id: string;
+  member_user_id: string;
+  leader_role: "manager" | "supervisor";
+};
+
+type HierarchySelection = {
+  manager_user_id: string;
+  supervisor_user_id: string;
 };
 
 const emptyForm = (): FormState => ({
@@ -99,6 +111,9 @@ export function SettingsUserManagement() {
   const [showPassword, setShowPassword] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ListedAppUser | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [hierarchy, setHierarchy] = useState<Record<string, HierarchySelection>>({});
+  const [savingHierarchyFor, setSavingHierarchyFor] = useState<string | null>(null);
+  const [hierarchyLoading, setHierarchyLoading] = useState(true);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -116,6 +131,30 @@ export function SettingsUserManagement() {
   useEffect(() => {
     void loadUsers();
   }, [loadUsers]);
+
+  const loadHierarchy = useCallback(async () => {
+    setHierarchyLoading(true);
+    try {
+      const res = await invokeAdminUsers<{ edges: HierarchyEdge[] }>({ action: "list_hierarchy" });
+      const next: Record<string, HierarchySelection> = {};
+      for (const edge of res.edges || []) {
+        const cur = next[edge.member_user_id] || { manager_user_id: "", supervisor_user_id: "" };
+        if (edge.leader_role === "manager") cur.manager_user_id = edge.leader_user_id;
+        if (edge.leader_role === "supervisor") cur.supervisor_user_id = edge.leader_user_id;
+        next[edge.member_user_id] = cur;
+      }
+      setHierarchy(next);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load hierarchy assignments");
+      setHierarchy({});
+    } finally {
+      setHierarchyLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHierarchy();
+  }, [loadHierarchy]);
 
   function openCreate() {
     setFormMode("create");
@@ -149,8 +188,8 @@ export function SettingsUserManagement() {
     } else if (form.password.length > 0 && form.password.length < MIN_PASSWORD_LEN) {
       return `New password must be at least ${MIN_PASSWORD_LEN} characters.`;
     }
-    if (form.role === "salesperson" && !form.salesperson_name.trim()) {
-      return "Salesperson display name is required for salesperson accounts (used for Shopify assignment matching).";
+    if (form.role !== "admin" && !form.salesperson_name.trim()) {
+      return "Salesperson display name is required for non-admin accounts (used for Shopify assignment matching).";
     }
     return null;
   }
@@ -170,7 +209,7 @@ export function SettingsUserManagement() {
           password: form.password,
           full_name: form.full_name.trim(),
           role: form.role,
-          salesperson_name: form.role === "salesperson" ? form.salesperson_name.trim() : "",
+          salesperson_name: form.role === "admin" ? "" : form.salesperson_name.trim(),
         });
         toast.success("User created");
       } else if (editing) {
@@ -183,8 +222,8 @@ export function SettingsUserManagement() {
         if (form.password.trim()) payload.password = form.password;
         if (editing.role !== form.role) {
           payload.role = form.role;
-          if (form.role === "salesperson") payload.salesperson_name = form.salesperson_name.trim();
-        } else if (form.role === "salesperson" && form.salesperson_name.trim() !== (editing.salesperson_name || "")) {
+          if (form.role !== "admin") payload.salesperson_name = form.salesperson_name.trim();
+        } else if (form.role !== "admin" && form.salesperson_name.trim() !== (editing.salesperson_name || "")) {
           payload.salesperson_name = form.salesperson_name.trim();
         }
         await invokeAdminUsers(payload);
@@ -211,6 +250,36 @@ export function SettingsUserManagement() {
       toast.error(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function saveHierarchy(memberUserId: string) {
+    const row = hierarchy[memberUserId] || { manager_user_id: "", supervisor_user_id: "" };
+    if (row.manager_user_id && row.manager_user_id === memberUserId) {
+      toast.error("Manager cannot be the same user.");
+      return;
+    }
+    if (row.supervisor_user_id && row.supervisor_user_id === memberUserId) {
+      toast.error("Supervisor cannot be the same user.");
+      return;
+    }
+    if (row.manager_user_id && row.supervisor_user_id && row.manager_user_id === row.supervisor_user_id) {
+      toast.error("Manager and supervisor must be different users.");
+      return;
+    }
+    setSavingHierarchyFor(memberUserId);
+    try {
+      await invokeAdminUsers({
+        action: "save_hierarchy",
+        member_user_id: memberUserId,
+        manager_user_id: row.manager_user_id || null,
+        supervisor_user_id: row.supervisor_user_id || null,
+      });
+      toast.success("Hierarchy assignment saved.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save hierarchy assignment");
+    } finally {
+      setSavingHierarchyFor(null);
     }
   }
 
@@ -264,7 +333,7 @@ export function SettingsUserManagement() {
         <Label>Role</Label>
         <Select
           value={form.role}
-          onValueChange={(v) => setForm((f) => ({ ...f, role: v as "admin" | "salesperson" }))}
+          onValueChange={(v) => setForm((f) => ({ ...f, role: v as "admin" | "supervisor" | "manager" | "salesperson" }))}
           disabled={saving}
         >
           <SelectTrigger className="w-full">
@@ -272,11 +341,13 @@ export function SettingsUserManagement() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="admin">Admin</SelectItem>
+            <SelectItem value="supervisor">Supervisor</SelectItem>
+            <SelectItem value="manager">Manager</SelectItem>
             <SelectItem value="salesperson">Salesperson</SelectItem>
           </SelectContent>
         </Select>
       </div>
-      {form.role === "salesperson" && (
+      {form.role !== "admin" && (
         <div className="space-y-2">
           <Label htmlFor="um-sp">Salesperson label</Label>
           <Input
@@ -306,7 +377,12 @@ export function SettingsUserManagement() {
     </div>
   );
 
+  const managerOptions = users.filter((u) => u.role === "manager");
+  const supervisorOptions = users.filter((u) => u.role === "supervisor");
+  const memberOptions = users.filter((u) => u.role !== "admin");
+
   return (
+    <div className="space-y-6">
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -436,6 +512,9 @@ export function SettingsUserManagement() {
           <DialogContent className="gap-3 p-4 sm:max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{formMode === "create" ? "New user" : "Edit user"}</DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground font-body">
+                Manage account details, role assignment, and salesperson display identity.
+              </DialogDescription>
             </DialogHeader>
             {formFields}
             <DialogFooter className="gap-2 sm:gap-0">{formFooter}</DialogFooter>
@@ -476,5 +555,102 @@ export function SettingsUserManagement() {
         </AlertDialogContent>
       </AlertDialog>
     </Card>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Network className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <CardTitle className="text-lg">Hierarchy assignments</CardTitle>
+            <CardDescription>Assign manager and supervisor oversight for each non-admin user.</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {hierarchyLoading || loading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        ) : memberOptions.length === 0 ? (
+          <p className="text-sm text-muted-foreground font-body">No non-admin users available for assignment.</p>
+        ) : (
+          <div className="space-y-3">
+            {memberOptions.map((member) => {
+              const row = hierarchy[member.id] || { manager_user_id: "", supervisor_user_id: "" };
+              return (
+                <div key={member.id} className="rounded-xl border border-border p-3 grid grid-cols-1 md:grid-cols-[1.3fr_1fr_1fr_auto] gap-3 items-end">
+                  <div>
+                    <p className="font-medium text-foreground">{member.full_name || member.email || "User"}</p>
+                    <p className="text-xs text-muted-foreground">{member.email} • {member.role || "No role"}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Manager</Label>
+                    <Select
+                      value={row.manager_user_id || "__none__"}
+                      onValueChange={(v) =>
+                        setHierarchy((prev) => ({
+                          ...prev,
+                          [member.id]: {
+                            ...(prev[member.id] || { manager_user_id: "", supervisor_user_id: "" }),
+                            manager_user_id: v === "__none__" ? "" : v,
+                          },
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select manager" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {managerOptions.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>{m.full_name || m.email || m.id}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Supervisor</Label>
+                    <Select
+                      value={row.supervisor_user_id || "__none__"}
+                      onValueChange={(v) =>
+                        setHierarchy((prev) => ({
+                          ...prev,
+                          [member.id]: {
+                            ...(prev[member.id] || { manager_user_id: "", supervisor_user_id: "" }),
+                            supervisor_user_id: v === "__none__" ? "" : v,
+                          },
+                        }))
+                      }
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select supervisor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {supervisorOptions.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.full_name || s.email || s.id}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => void saveHierarchy(member.id)}
+                    disabled={savingHierarchyFor === member.id}
+                    className="w-full md:w-auto"
+                  >
+                    {savingHierarchyFor === member.id ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Save
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+    </div>
   );
 }

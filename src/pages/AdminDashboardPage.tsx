@@ -1,17 +1,13 @@
 import { DollarSign, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import {
-  useCustomers,
-  useCustomersCount,
-  useCustomersCountInRange,
-  useOrdersCount,
-  useOrdersMetricsInRange,
-  useOrdersTotalRevenue,
   useRecentOrders,
   useRecentOrdersInRange,
   useRevenueByMonthForYear,
   useOrdersTimeseriesInRange,
   useUnfulfilledOrdersCount,
+  useSalespersonPerformance,
+  useScopeOrderMetrics,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useMemo, useEffect, useState } from "react";
@@ -25,8 +21,8 @@ import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-
 import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
+import { useAuth } from "@/contexts/AuthContext";
 
-const DASHBOARD_UNASSIGNED = "Unassigned";
 const TOP_SALES_BAR_COLORS = [
   "hsl(100 45% 42%)",
   "hsl(104 46% 46%)",
@@ -38,10 +34,6 @@ const TOP_SALES_BAR_COLORS = [
   "hsl(88 38% 46%)",
 ];
 /** Matches Customers / sync: null or literal Unassigned */
-function customerIsUnassigned(c: { sp_assigned?: string | null }): boolean {
-  return !c.sp_assigned || c.sp_assigned === DASHBOARD_UNASSIGNED;
-}
-
 export default function AdminDashboardPage() {
   const LICENSE_BANNER_DISMISS_UNTIL_KEY = "datapulse_license_banner_dismiss_until_ms";
   const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -64,17 +56,19 @@ export default function AdminDashboardPage() {
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
 
-  const { data: customers, isLoading: loadingCustomers } = useCustomers();
-  const { data: totalOrdersAll = 0, isLoading: loadingOrdersAll } = useOrdersCount();
-  const { data: totalCustomersAll = 0, isLoading: loadingCustomersAll } = useCustomersCount();
-  const { data: totalRevenueAll = 0, isLoading: loadingRevenueAll } = useOrdersTotalRevenue();
-  const { data: metricsRange, isLoading: loadingMetricsRange } = useOrdersMetricsInRange(fromIso, toIso, "admin", !isAll);
-  const { data: metricsCompare } = useOrdersMetricsInRange(cmpFromIso, cmpToIso, "admin", !isAll && Boolean(cmpFromIso && cmpToIso));
-  const { data: customersRange = 0, isLoading: loadingCustomersRange } = useCustomersCountInRange(
+  const { user } = useAuth();
+  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(user?.id, null, null, Boolean(user?.id));
+  const { data: rangeMetrics, isLoading: loadingRangeMetrics } = useScopeOrderMetrics(
+    user?.id,
     fromIso,
     toIso,
-    "admin",
-    !isAll,
+    !isAll && Boolean(user?.id),
+  );
+  const { data: compareMetrics } = useScopeOrderMetrics(
+    user?.id,
+    cmpFromIso,
+    cmpToIso,
+    !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
   );
   const { data: seriesRange = [], isLoading: loadingSeries } = useOrdersTimeseriesInRange(
     fromIso,
@@ -93,15 +87,15 @@ export default function AdminDashboardPage() {
     !isAll,
   );
   const { data: revenueData = [], isLoading: loadingRevenue } = useRevenueByMonthForYear(year);
-  const totalRevenue = isAll ? totalRevenueAll : (metricsRange?.revenue ?? 0);
-  const totalOrders = isAll ? totalOrdersAll : (metricsRange?.count ?? 0);
-  const totalCustomers = isAll ? totalCustomersAll : customersRange;
+  const totalRevenue = isAll ? (allMetrics?.revenue ?? 0) : (rangeMetrics?.revenue ?? 0);
+  const totalOrders = isAll ? (allMetrics?.orders_count ?? 0) : (rangeMetrics?.orders_count ?? 0);
+  const totalCustomers = isAll ? (allMetrics?.customers_count ?? 0) : (rangeMetrics?.customers_count ?? 0);
   const recentOrders = isAll ? recentOrdersAll : recentFiltered;
-  const loadingRevenueTotal = isAll ? loadingRevenueAll : loadingMetricsRange;
-  const loadingOrdersCount = isAll ? loadingOrdersAll : loadingMetricsRange;
-  const loadingCustomersCount = isAll ? loadingCustomersAll : loadingCustomersRange;
+  const loadingRevenueTotal = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const loadingOrdersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const loadingCustomersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
-  const prevRevenue = metricsCompare?.revenue ?? 0;
+  const prevRevenue = compareMetrics?.revenue ?? 0;
   const revDelta =
     !isAll && prevRevenue > 0 ? (((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
   const barChartData = useMemo(() => {
@@ -117,6 +111,7 @@ export default function AdminDashboardPage() {
   const [dismissedUntilMs, setDismissedUntilMs] = useState(0);
   const [salespersonSearch, setSalespersonSearch] = useState("");
   const [salespersonPage, setSalespersonPage] = useState(1);
+  const { data: salespersonPerformance = [], isLoading: loadingSalespersonPerformance } = useSalespersonPerformance("admin");
 
   useEffect(() => {
     const loadLicenseSettings = async () => {
@@ -147,39 +142,19 @@ export default function AdminDashboardPage() {
     setDismissedUntilMs(Number.isFinite(parsed) ? parsed : 0);
   }, []);
 
-  const salesBySP = useMemo(() => {
-    const map: Record<string, number> = {};
-    let unassignedRevenue = 0;
-    for (const c of customers || []) {
-      if (customerIsUnassigned(c)) {
-        unassignedRevenue += Number(c.total_revenue || 0);
-        continue;
-      }
-      const key = c.sp_assigned as string;
-      map[key] = (map[key] || 0) + Number(c.total_revenue || 0);
-    }
-    const assignedRows = Object.entries(map)
-      .map(([name, revenue]) => ({ name: name.split(" ")[0], fullName: name, revenue }))
-      .sort((a, b) => b.revenue - a.revenue);
-    const unassignedCount = (customers || []).filter(customerIsUnassigned).length;
-    if (unassignedCount > 0 || unassignedRevenue > 0) {
-      return [
-        ...assignedRows,
-        { name: DASHBOARD_UNASSIGNED, fullName: DASHBOARD_UNASSIGNED, revenue: unassignedRevenue },
-      ];
-    }
-    return assignedRows;
-  }, [customers]);
-  const salesRows = useMemo(
+  const salesBySP = useMemo(
     () =>
-      salesBySP.map((sp) => ({
-        ...sp,
-        custCount:
-          sp.fullName === DASHBOARD_UNASSIGNED
-            ? (customers || []).filter(customerIsUnassigned).length
-            : (customers || []).filter((c) => c.sp_assigned === sp.fullName).length,
+      salespersonPerformance.map((sp) => ({
+        name: sp.salesperson_name.split(" ")[0],
+        fullName: sp.salesperson_name,
+        revenue: Number(sp.revenue || 0),
+        custCount: Number(sp.customers_count || 0),
       })),
-    [salesBySP, customers],
+    [salespersonPerformance],
+  );
+  const salesRows = useMemo(
+    () => salesBySP,
+    [salesBySP],
   );
   const filteredSalesRows = useMemo(() => {
     const q = salespersonSearch.trim().toLowerCase();
@@ -399,7 +374,7 @@ export default function AdminDashboardPage() {
             </div>
           )}
         </div>
-        {!loadingCustomers && salesBySP.length > 0 && (
+        {!loadingSalespersonPerformance && salesBySP.length > 0 && (
           <div className="card-float p-5 h-full opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
             <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 Salesperson Revenue Progress</h3>
             <div className="space-y-3">
@@ -432,7 +407,7 @@ export default function AdminDashboardPage() {
           </div>
         )}
       </div>
-      {!loadingCustomers && salesBySP.length > 0 && (
+      {!loadingSalespersonPerformance && salesBySP.length > 0 && (
         <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "400ms" }}>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h3 className="font-heading font-semibold text-foreground">Salesperson Performance</h3>
@@ -451,20 +426,13 @@ export default function AdminDashboardPage() {
               <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Customers</th><th className="text-right py-2.5 font-medium">Revenue</th></tr></thead>
               <tbody>
                 {pagedSalesRows.map((sp) => {
-                  const isUnassignedRow = sp.fullName === DASHBOARD_UNASSIGNED;
                   return (
                     <tr key={sp.fullName} className="border-b last:border-0 hover:bg-muted/50 transition-colors">
                       <td className="py-3">
                         <div className="flex items-center gap-3">
-                          <div
-                            className={`h-8 w-8 rounded-full flex items-center justify-center ${
-                              isUnassignedRow ? "bg-warning/20" : "gradient-primary"
-                            }`}
-                          >
+                          <div className="h-8 w-8 rounded-full flex items-center justify-center gradient-primary">
                             <span
-                              className={`text-[10px] font-bold font-heading ${
-                                isUnassignedRow ? "text-warning" : "text-primary-foreground"
-                              }`}
+                              className="text-[10px] font-bold font-heading text-primary-foreground"
                             >
                               {sp.fullName.split(" ").map((w) => w[0]).join("")}
                             </span>

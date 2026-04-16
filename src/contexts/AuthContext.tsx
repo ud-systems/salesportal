@@ -1,14 +1,16 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import { resolveCapabilities, type AppCapability } from "@/lib/auth-capabilities";
 
-export type UserRole = "admin" | "salesperson";
+export type UserRole = "admin" | "supervisor" | "manager" | "salesperson";
 
 export interface AppUser {
   id: string;
   name: string;
   email: string;
   role: UserRole;
+  roles: UserRole[];
   initials: string;
   salesperson_name?: string;
   /** False when no `user_roles` row exists — RLS will not grant salesperson data until an admin provisions the account. */
@@ -20,7 +22,11 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
+  capabilities: AppCapability[];
+  hasCapability: (capability: AppCapability) => boolean;
   isAdmin: boolean;
+  isSupervisor: boolean;
+  isManager: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -32,17 +38,33 @@ function getInitials(email: string, name?: string): string {
   return email.slice(0, 2).toUpperCase();
 }
 
-async function fetchUserRole(userId: string): Promise<{ role: UserRole; salesperson_name?: string } | null> {
+const rolePriority: UserRole[] = ["admin", "supervisor", "manager", "salesperson"];
+
+function pickPrimaryRole(roles: UserRole[]): UserRole {
+  for (const role of rolePriority) {
+    if (roles.includes(role)) return role;
+  }
+  return "salesperson";
+}
+
+async function fetchUserRole(userId: string): Promise<{ role: UserRole; roles: UserRole[]; salesperson_name?: string } | null> {
   const { data, error } = await supabase
     .from("user_roles")
     .select("role, salesperson_name")
     .eq("user_id", userId)
-    .maybeSingle();
+    .returns<{ role: UserRole; salesperson_name: string | null }[]>();
   if (error || !data) return null;
-  return { role: data.role as UserRole, salesperson_name: data.salesperson_name || undefined };
+  const roles = Array.from(new Set(data.map((row) => row.role)));
+  if (!roles.length) return null;
+  const salespersonRow = data.find((row) => row.role === "salesperson");
+  return {
+    role: pickPrimaryRole(roles),
+    roles,
+    salesperson_name: salespersonRow?.salesperson_name || undefined,
+  };
 }
 
-function buildAppUser(authUser: User, role: UserRole, opts?: { salesperson_name?: string; hasDbRole?: boolean }): AppUser {
+function buildAppUser(authUser: User, role: UserRole, opts?: { roles?: UserRole[]; salesperson_name?: string; hasDbRole?: boolean }): AppUser {
   const email = authUser.email || "";
   const salesperson_name = opts?.salesperson_name;
   const name = authUser.user_metadata?.full_name || authUser.user_metadata?.name || salesperson_name || email.split("@")[0];
@@ -51,6 +73,7 @@ function buildAppUser(authUser: User, role: UserRole, opts?: { salesperson_name?
     name,
     email,
     role,
+    roles: opts?.roles?.length ? opts.roles : [role],
     initials: getInitials(email, name),
     salesperson_name,
     hasDbRole: opts?.hasDbRole ?? true,
@@ -68,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (roleData) {
           setUser(
             buildAppUser(session.user, roleData.role, {
+              roles: roleData.roles,
               salesperson_name: roleData.salesperson_name,
               hasDbRole: true,
             }),
@@ -106,8 +130,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const capabilities = user ? resolveCapabilities(user.roles) : [];
+  const hasCapability = (capability: AppCapability) => capabilities.includes(capability);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin: user?.role === "admin" }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        logout,
+        capabilities,
+        hasCapability,
+        isAdmin: user?.roles.includes("admin") ?? false,
+        isSupervisor: user?.roles.includes("supervisor") ?? false,
+        isManager: user?.roles.includes("manager") ?? false,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

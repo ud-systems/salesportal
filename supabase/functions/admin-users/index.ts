@@ -4,7 +4,7 @@ import { requireAdmin } from "../_shared/require-admin.ts";
 
 const MIN_PASSWORD_LEN = 8;
 
-type AppRole = "admin" | "salesperson";
+type AppRole = "admin" | "supervisor" | "manager" | "salesperson";
 
 function jsonErr(msg: string, status: number) {
   return new Response(JSON.stringify({ error: msg }), {
@@ -20,11 +20,32 @@ function jsonOk(data: unknown) {
   });
 }
 
+const rolePriority: AppRole[] = ["admin", "supervisor", "manager", "salesperson"];
+
+function isValidRole(role: string): role is AppRole {
+  return rolePriority.includes(role as AppRole);
+}
+
 function pickRoleRow(rows: { role: AppRole; salesperson_name: string | null }[]) {
   if (!rows.length) return null;
-  const admin = rows.find((r) => r.role === "admin");
-  if (admin) return admin;
-  return rows[0];
+  for (const role of rolePriority) {
+    const found = rows.find((row) => row.role === role);
+    if (found) return found;
+  }
+  return null;
+}
+
+function buildRoleRows(role: AppRole, salespersonName: string | null) {
+  if (role === "admin") {
+    return [{ role: "admin" as const, salesperson_name: null }];
+  }
+  if (role === "salesperson") {
+    return [{ role: "salesperson" as const, salesperson_name: salespersonName }];
+  }
+  return [
+    { role, salesperson_name: salespersonName },
+    { role: "salesperson" as const, salesperson_name: salespersonName },
+  ];
 }
 
 async function handleList(supabase: SupabaseClient) {
@@ -57,13 +78,14 @@ async function handleList(supabase: SupabaseClient) {
     const roleRow = pickRoleRow(rows);
     const meta = u.user_metadata || {};
     const full_name = String(meta.full_name || meta.name || "");
+    const salespersonRow = rows.find((r) => r.role === "salesperson");
     return {
       id: u.id,
       email: u.email ?? null,
       full_name,
       created_at: u.created_at,
       role: roleRow?.role ?? null,
-      salesperson_name: roleRow?.salesperson_name ?? null,
+      salesperson_name: salespersonRow?.salesperson_name ?? roleRow?.salesperson_name ?? null,
       has_role_row: !!roleRow,
     };
   });
@@ -85,8 +107,8 @@ async function handleCreate(
   if (password.length < MIN_PASSWORD_LEN) {
     return jsonErr(`Password must be at least ${MIN_PASSWORD_LEN} characters`, 400);
   }
-  if (role !== "admin" && role !== "salesperson") return jsonErr("Invalid role", 400);
-  if (role === "salesperson" && !salesperson_name) {
+  if (!isValidRole(role)) return jsonErr("Invalid role", 400);
+  if (role !== "admin" && !salesperson_name) {
     salesperson_name = full_name || email.split("@")[0] || "Salesperson";
   }
 
@@ -102,11 +124,14 @@ async function handleCreate(
   const user = authData.user;
   if (!user) return jsonErr("User creation failed", 500);
 
-  const { error: roleErr } = await supabase.from("user_roles").insert({
-    user_id: user.id,
-    role,
-    salesperson_name: role === "salesperson" ? salesperson_name : null,
-  });
+  const roleRows = buildRoleRows(role, role === "admin" ? null : salesperson_name);
+  const { error: roleErr } = await supabase.from("user_roles").insert(
+    roleRows.map((row) => ({
+      user_id: user.id,
+      role: row.role,
+      salesperson_name: row.salesperson_name,
+    })),
+  );
   if (roleErr) {
     await supabase.auth.admin.deleteUser(user.id);
     return jsonErr(roleErr.message, 500);
@@ -165,7 +190,7 @@ async function handleUpdate(
   }
 
   if (role !== undefined) {
-    if (role !== "admin" && role !== "salesperson") return jsonErr("Invalid role", 400);
+    if (!isValidRole(role)) return jsonErr("Invalid role", 400);
 
     const { data: currentRows } = await supabase.from("user_roles").select("role").eq("user_id", user_id);
     const wasAdmin = currentRows?.some((r) => r.role === "admin");
@@ -179,7 +204,7 @@ async function handleUpdate(
     }
 
     let spName: string | null = role === "admin" ? null : (salesperson_name_in ?? "");
-    if (role === "salesperson" && !spName) {
+    if (role !== "admin" && !spName) {
       const meta = existingUser.user_metadata as Record<string, string | undefined>;
       spName =
         meta?.full_name ||
@@ -189,25 +214,27 @@ async function handleUpdate(
     }
 
     await supabase.from("user_roles").delete().eq("user_id", user_id);
-    const { error: insErr } = await supabase.from("user_roles").insert({
-      user_id,
-      role,
-      salesperson_name: spName,
-    });
+    const roleRows = buildRoleRows(role, spName);
+    const { error: insErr } = await supabase.from("user_roles").insert(
+      roleRows.map((row) => ({
+        user_id,
+        role: row.role,
+        salesperson_name: row.salesperson_name,
+      })),
+    );
     if (insErr) return jsonErr(insErr.message, 500);
   } else if (spProvided && salesperson_name_in !== undefined) {
-    const { data: spRow } = await supabase
+    const { data: rows } = await supabase
       .from("user_roles")
       .select("role")
-      .eq("user_id", user_id)
-      .eq("role", "salesperson")
-      .maybeSingle();
-    if (!spRow) return jsonErr("User is not a salesperson", 400);
+      .eq("user_id", user_id);
+    const hasNonAdminRole = !!rows?.some((r) => r.role !== "admin");
+    if (!hasNonAdminRole) return jsonErr("User does not have a sales role", 400);
     const { error } = await supabase
       .from("user_roles")
       .update({ salesperson_name: salesperson_name_in || null })
       .eq("user_id", user_id)
-      .eq("role", "salesperson");
+      .neq("role", "admin");
     if (error) return jsonErr(error.message, 500);
   }
 
@@ -235,6 +262,72 @@ async function handleDelete(
 
   const { error } = await supabase.auth.admin.deleteUser(user_id);
   if (error) return jsonErr(error.message, 400);
+  return jsonOk({ success: true });
+}
+
+async function handleListHierarchy(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("sales_hierarchy_edges")
+    .select("leader_user_id, member_user_id, leader_role");
+  if (error) return jsonErr(error.message, 500);
+  return jsonOk({ edges: data ?? [] });
+}
+
+async function userHasRole(supabase: SupabaseClient, userId: string, role: AppRole) {
+  const { data } = await supabase
+    .from("user_roles")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("role", role)
+    .maybeSingle();
+  return !!data;
+}
+
+async function handleSaveHierarchy(supabase: SupabaseClient, body: Record<string, unknown>) {
+  const memberUserId = String(body.member_user_id || "");
+  const managerUserId = body.manager_user_id ? String(body.manager_user_id) : "";
+  const supervisorUserId = body.supervisor_user_id ? String(body.supervisor_user_id) : "";
+
+  if (!memberUserId) return jsonErr("member_user_id is required", 400);
+  if (managerUserId && managerUserId === memberUserId) return jsonErr("Manager cannot be the same user", 400);
+  if (supervisorUserId && supervisorUserId === memberUserId) return jsonErr("Supervisor cannot be the same user", 400);
+  if (managerUserId && supervisorUserId && managerUserId === supervisorUserId) {
+    return jsonErr("Manager and supervisor must be different users", 400);
+  }
+
+  const memberIsSales = await userHasRole(supabase, memberUserId, "salesperson");
+  if (!memberIsSales) return jsonErr("Target user must have salesperson role", 400);
+
+  if (managerUserId) {
+    const managerIsManager = await userHasRole(supabase, managerUserId, "manager");
+    if (!managerIsManager) return jsonErr("Selected manager does not have manager role", 400);
+  }
+  if (supervisorUserId) {
+    const supervisorIsSupervisor = await userHasRole(supabase, supervisorUserId, "supervisor");
+    if (!supervisorIsSupervisor) return jsonErr("Selected supervisor does not have supervisor role", 400);
+  }
+
+  await supabase
+    .from("sales_hierarchy_edges")
+    .delete()
+    .eq("member_user_id", memberUserId)
+    .eq("leader_role", "manager");
+
+  await supabase
+    .from("sales_hierarchy_edges")
+    .delete()
+    .eq("member_user_id", memberUserId)
+    .eq("leader_role", "supervisor");
+
+  const rows: { leader_user_id: string; member_user_id: string; leader_role: "manager" | "supervisor" }[] = [];
+  if (managerUserId) rows.push({ leader_user_id: managerUserId, member_user_id: memberUserId, leader_role: "manager" });
+  if (supervisorUserId) rows.push({ leader_user_id: supervisorUserId, member_user_id: memberUserId, leader_role: "supervisor" });
+
+  if (rows.length) {
+    const { error } = await supabase.from("sales_hierarchy_edges").insert(rows);
+    if (error) return jsonErr(error.message, 500);
+  }
+
   return jsonOk({ success: true });
 }
 
@@ -287,8 +380,12 @@ Deno.serve(async (req) => {
         return await handleUpdate(supabase, body, caller.id);
       case "delete":
         return await handleDelete(supabase, body, caller.id);
+      case "list_hierarchy":
+        return await handleListHierarchy(supabase);
+      case "save_hierarchy":
+        return await handleSaveHierarchy(supabase, body);
       default:
-        return jsonErr('Unknown action. Use "list", "create", "update", or "delete".', 400);
+        return jsonErr('Unknown action. Use "list", "create", "update", "delete", "list_hierarchy", or "save_hierarchy".', 400);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Server error";

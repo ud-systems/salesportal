@@ -59,10 +59,10 @@ const App = () => (
               <Route path="/collections" element={<CollectionsPage />} />
               <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/salespersons" element={<ProtectedRoute allowedRoles={["admin"]}><SalespersonsPage /></ProtectedRoute>} />
-              <Route path="/sync-logs" element={<ProtectedRoute allowedRoles={["admin"]}><SyncLogsPage /></ProtectedRoute>} />
-              <Route path="/webhook-monitor" element={<ProtectedRoute allowedRoles={["admin"]}><WebhookMonitorPage /></ProtectedRoute>} />
-              <Route path="/settings" element={<ProtectedRoute allowedRoles={["admin"]}><SettingsPage /></ProtectedRoute>} />
+              <Route path="/salespersons" element={<ProtectedRoute requiredCapabilities={["view_salespersons_page"]}><SalespersonsPage /></ProtectedRoute>} />
+              <Route path="/sync-logs" element={<ProtectedRoute requiredCapabilities={["view_sync_logs"]}><SyncLogsPage /></ProtectedRoute>} />
+              <Route path="/webhook-monitor" element={<ProtectedRoute requiredCapabilities={["view_webhook_monitor"]}><WebhookMonitorPage /></ProtectedRoute>} />
+              <Route path="/settings" element={<ProtectedRoute requiredCapabilities={["manage_settings"]}><SettingsPage /></ProtectedRoute>} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

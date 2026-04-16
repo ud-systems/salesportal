@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LineChart, Line } from "recharts";
+import { XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Area, AreaChart, Bar, ComposedChart, Line } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,9 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DollarSign, ShoppingCart, Users, TrendingUp, FileDown, FileText, LayoutList, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  useCustomersCountInRange,
-  useOrdersMetricsInRange,
-  useOrdersTimeseriesInRange,
+  useScopeOrderTimeseries,
+  useScopeOrderMetrics,
 } from "@/hooks/use-shopify-data";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { differenceInCalendarDays } from "date-fns";
@@ -27,6 +26,8 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { ChartNoAxesCombined } from "lucide-react";
 
 const PREVIEW_ROW_CAP = 200;
 const MONEY_COLUMN_HINTS = /(revenue|total|subtotal|tax|price|amount|value|avg|average)/i;
@@ -42,6 +43,8 @@ function reportFileSlug(id: string) {
 
 function formatPresetLabel(preset: DatePreset): string {
   switch (preset) {
+    case "all":
+      return "All Time";
     case "today":
       return "Today";
     case "week":
@@ -131,6 +134,7 @@ async function getBrandLogoBadgeDataUrl(): Promise<string | null> {
 }
 
 export default function AnalyticsPage() {
+  const { user } = useAuth();
   const { data: currency = "GBP" } = useShopDisplayCurrency();
   const [preset, setPreset] = useState<DatePreset>("month");
   const [customFrom, setCustomFrom] = useState("");
@@ -151,23 +155,29 @@ export default function AnalyticsPage() {
   const fromIso = toRangeIso(range.from);
   const toIso = toRangeIso(range.to);
   const rangeDays =
-    range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 30;
+    range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
 
   const scopeKey = "analytics";
-  const { data: metrics, isLoading: loadingMetrics } = useOrdersMetricsInRange(fromIso, toIso, scopeKey, Boolean(fromIso && toIso));
-  const { data: custCount = 0, isLoading: loadingCust } = useCustomersCountInRange(fromIso, toIso, scopeKey, Boolean(fromIso && toIso));
-  const { data: series = [], isLoading: loadingSeries } = useOrdersTimeseriesInRange(
+  const { data: metrics, isLoading: loadingMetrics } = useScopeOrderMetrics(
+    user?.id,
+    fromIso,
+    toIso,
+    Boolean(user?.id),
+  );
+  const { data: series = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
+    user?.id,
     fromIso,
     toIso,
     bucket,
     scopeKey,
-    Boolean(fromIso && toIso),
+    Boolean(user?.id),
   );
 
   const revenue = metrics?.revenue ?? 0;
-  const orders = metrics?.count ?? 0;
-  const aov = orders > 0 ? Math.round(revenue / orders) : 0;
+  const orders = metrics?.orders_count ?? 0;
+  const custCount = metrics?.customers_count ?? 0;
+  const aov = metrics?.avg_order_value ?? 0;
   const chartSeries = useMemo(() => series.map((point) => ({ ...point })), [series]);
   const chartRenderKey = useMemo(() => {
     const totals = chartSeries.reduce(
@@ -196,6 +206,18 @@ export default function AnalyticsPage() {
       return (value: number) => formatOrderMoney(value, null, currency);
     }
   }, [currency]);
+  const chartTotals = useMemo(
+    () =>
+      chartSeries.reduce(
+        (acc, point) => {
+          acc.revenue += Number(point.revenue || 0);
+          acc.orders += Number(point.orders || 0);
+          return acc;
+        },
+        { revenue: 0, orders: 0 },
+      ),
+    [chartSeries],
+  );
 
   const selectedDef = ANALYTICS_REPORTS.find((r) => r.id === selectedReportId) as ReportDefinition | undefined;
   const rangeReady = Boolean(fromIso && toIso);
@@ -212,6 +234,7 @@ export default function AnalyticsPage() {
       fromIso,
       toIso,
       currency,
+      viewerUserId: user?.id,
       lowStockThreshold,
     })
       .then((data) => {
@@ -229,7 +252,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedReportId, selectedDef, canLoadReport, fromIso, toIso, currency, lowStockThreshold]);
+  }, [selectedReportId, selectedDef, canLoadReport, fromIso, toIso, currency, user?.id, lowStockThreshold]);
 
   const previewRows = preview?.rows ?? [];
   const previewSlice = previewRows.slice(0, PREVIEW_ROW_CAP);
@@ -269,6 +292,7 @@ export default function AnalyticsPage() {
         fromIso,
         toIso,
         currency,
+        viewerUserId: user?.id,
         lowStockThreshold,
       });
       const csv = rowsToCsv(columns, rows);
@@ -297,6 +321,7 @@ export default function AnalyticsPage() {
         fromIso,
         toIso,
         currency,
+        viewerUserId: user?.id,
         lowStockThreshold,
       });
       const wide = columns.length > 6;
@@ -396,6 +421,7 @@ export default function AnalyticsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
               <SelectItem value="today">Today</SelectItem>
               <SelectItem value="week">Last 7 days</SelectItem>
               <SelectItem value="month">This month</SelectItem>
@@ -449,7 +475,7 @@ export default function AnalyticsPage() {
             />
             <KpiCard
               title="New customers"
-              value={loadingCust ? <Skeleton className="h-8 w-16 rounded-md" /> : String(custCount)}
+              value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(custCount)}
               icon={Users}
               delay={150}
             />
@@ -463,19 +489,27 @@ export default function AnalyticsPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card-float p-4 sm:p-5">
-              <h3 className="font-heading font-semibold text-foreground mb-3 sm:mb-4">Revenue trend</h3>
+              <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
+                <h3 className="font-heading font-semibold text-foreground">Revenue trend</h3>
+                <span className="text-xs text-muted-foreground font-body">
+                  Total {formatOrderMoney(chartTotals.revenue, null, currency)}
+                </span>
+              </div>
               {loadingSeries ? (
                 <Skeleton className="h-[220px] sm:h-[240px] w-full rounded-xl" />
               ) : chartSeries.length === 0 ? (
-                <p className="text-muted-foreground text-sm font-body py-12 text-center">No orders in this range.</p>
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 bg-muted/20">
+                  <ChartNoAxesCombined className="h-5 w-5 text-muted-foreground" />
+                  <p className="text-muted-foreground text-sm font-body text-center">No orders in this period.</p>
+                </div>
               ) : (
-                <div className="h-[220px] sm:h-[240px] w-full">
-                  <ResponsiveContainer key={`revenue-${chartRenderKey}`} width="100%" height="100%">
-                    <BarChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full">
+                  <ResponsiveContainer key={`revenue-${chartRenderKey}`} width="100%" height="100%" minWidth={0} minHeight={220}>
+                    <ComposedChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis
                       dataKey="label"
-                      interval="preserveStartEnd"
+                      interval={chartSeries.length > 10 ? "preserveStartEnd" : 0}
                       minTickGap={20}
                       tick={{ fontSize: 11 }}
                       stroke="hsl(var(--muted-foreground))"
@@ -486,38 +520,82 @@ export default function AnalyticsPage() {
                       tick={{ fontSize: 11 }}
                       stroke="hsl(var(--muted-foreground))"
                     />
+                    <YAxis
+                      yAxisId="orders"
+                      orientation="right"
+                      width={0}
+                      hide
+                      domain={[0, "auto"]}
+                    />
                     <RechartsTooltip
-                      formatter={(v: number) => formatOrderMoney(v, null, currency)}
+                      formatter={(v: number, _name, item) => {
+                        if (item?.dataKey === "orders") return [Number(v || 0).toLocaleString(), "Orders"];
+                        return [formatOrderMoney(v, null, currency), "Revenue"];
+                      }}
+                      labelFormatter={(label) => `Period: ${label}`}
                       contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))" }}
                     />
                     <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
-                    </BarChart>
+                    <Line
+                      yAxisId="orders"
+                      type="monotone"
+                      dataKey="orders"
+                      stroke="hsl(var(--primary) / 0.7)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               )}
             </div>
             <div className="card-float p-4 sm:p-5">
-              <h3 className="font-heading font-semibold text-foreground mb-3 sm:mb-4">Order volume</h3>
+              <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
+                <h3 className="font-heading font-semibold text-foreground">Order volume</h3>
+                <span className="text-xs text-muted-foreground font-body">Total {chartTotals.orders.toLocaleString()}</span>
+              </div>
               {loadingSeries ? (
                 <Skeleton className="h-[220px] sm:h-[240px] w-full rounded-xl" />
               ) : chartSeries.length === 0 ? (
-                <p className="text-muted-foreground text-sm font-body py-12 text-center">No data.</p>
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 bg-muted/20">
+                  <ChartNoAxesCombined className="h-5 w-5 text-muted-foreground" />
+                  <p className="text-muted-foreground text-sm font-body text-center">No order volume data.</p>
+                </div>
               ) : (
-                <div className="h-[220px] sm:h-[240px] w-full">
-                  <ResponsiveContainer key={`orders-${chartRenderKey}`} width="100%" height="100%">
-                    <LineChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full">
+                  <ResponsiveContainer key={`orders-${chartRenderKey}`} width="100%" height="100%" minWidth={0} minHeight={220}>
+                    <AreaChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="analyticsOrdersGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.36} />
+                        <stop offset="65%" stopColor="hsl(var(--primary))" stopOpacity={0.14} />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis
                       dataKey="label"
-                      interval="preserveStartEnd"
+                      interval={chartSeries.length > 10 ? "preserveStartEnd" : 0}
                       minTickGap={20}
                       tick={{ fontSize: 11 }}
                       stroke="hsl(var(--muted-foreground))"
                     />
                     <YAxis width={44} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                    <RechartsTooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))" }} />
-                    <Line type="monotone" dataKey="orders" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-                    </LineChart>
+                    <RechartsTooltip
+                      formatter={(v: number) => [Number(v || 0).toLocaleString(), "Orders"]}
+                      labelFormatter={(label) => `Period: ${label}`}
+                      contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))" }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="orders"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2.5}
+                      fill="url(#analyticsOrdersGradient)"
+                      fillOpacity={1}
+                      activeDot={{ r: 4 }}
+                    />
+                    </AreaChart>
                   </ResponsiveContainer>
                 </div>
               )}

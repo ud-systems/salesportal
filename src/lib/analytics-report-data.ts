@@ -4,6 +4,7 @@ export type ReportFetchParams = {
   fromIso: string | null;
   toIso: string | null;
   currency: string;
+  viewerUserId?: string;
   lowStockThreshold?: number;
 };
 
@@ -67,7 +68,7 @@ export const ANALYTICS_REPORTS: ReportDefinition[] = [
   {
     id: "sales_by_salesperson",
     title: "Revenue by salesperson",
-    description: "Attributed via assigned customer (SP metafield) for orders linked to customers.",
+    description: "Identity-based attribution from salesperson/customer assignment mappings.",
     requiresRange: true,
   },
   {
@@ -86,6 +87,24 @@ export const ANALYTICS_REPORTS: ReportDefinition[] = [
     id: "customer_directory",
     title: "Customer directory",
     description: "Customers with orders, revenue, spend currency, city and assigned salesperson.",
+    requiresRange: false,
+  },
+  {
+    id: "manager_performance",
+    title: "Manager performance",
+    description: "Team performance rollups for users with manager role.",
+    requiresRange: false,
+  },
+  {
+    id: "supervisor_performance",
+    title: "Supervisor performance",
+    description: "Team performance rollups for users with supervisor role.",
+    requiresRange: false,
+  },
+  {
+    id: "team_performance",
+    title: "Team performance overview",
+    description: "Per-viewer team rollups across hierarchy scopes.",
     requiresRange: false,
   },
 ];
@@ -126,7 +145,7 @@ export async function fetchReportData(
   reportId: string,
   params: ReportFetchParams,
 ): Promise<{ columns: string[]; rows: (string | number)[][] }> {
-  const { fromIso, toIso, currency, lowStockThreshold = 10 } = params;
+  const { fromIso, toIso, currency, viewerUserId, lowStockThreshold = 10 } = params;
 
   if (ANALYTICS_REPORTS.find((r) => r.id === reportId)?.requiresRange && (!fromIso || !toIso)) {
     throw new Error("Select a date range for this report.");
@@ -134,25 +153,26 @@ export async function fetchReportData(
 
   switch (reportId) {
     case "sales_summary": {
-      const orders = await paginateOrdersInRange(fromIso!, toIso!, "total, subtotal, total_tax");
-      let revenue = 0;
-      let subtotal = 0;
-      let tax = 0;
-      for (const o of orders) {
-        revenue += Number((o as { total?: number }).total || 0);
-        subtotal += Number((o as { subtotal?: number }).subtotal || 0);
-        tax += Number((o as { total_tax?: number }).total_tax || 0);
-      }
-      const n = orders.length;
-      const aov = n > 0 ? revenue / n : 0;
+      if (!viewerUserId) throw new Error("Missing viewer context for sales summary.");
+      const { data, error } = await supabase.rpc("get_scope_order_metrics", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw error;
+      const metrics = (data?.[0] ?? {}) as {
+        orders_count?: number;
+        customers_count?: number;
+        revenue?: number;
+        avg_order_value?: number;
+      };
       return {
         columns: ["Metric", "Value"],
         rows: [
-          ["Orders", n],
-          ["Gross revenue (order total)", revenue.toFixed(2)],
-          ["Subtotal (sum)", subtotal.toFixed(2)],
-          ["Tax (sum)", tax.toFixed(2)],
-          ["Average order value", aov.toFixed(2)],
+          ["Orders", Number(metrics.orders_count || 0)],
+          ["Customers", Number(metrics.customers_count || 0)],
+          ["Gross revenue (order total)", Number(metrics.revenue || 0).toFixed(2)],
+          ["Average order value", Number(metrics.avg_order_value || 0).toFixed(2)],
           ["Display currency", currency],
         ],
       };
@@ -383,29 +403,61 @@ export async function fetchReportData(
     }
 
     case "sales_by_salesperson": {
-      const orders = await paginateOrdersInRange(fromIso!, toIso!, "customer_id, total");
-      const custIds = [...new Set(orders.map((o) => (o as { customer_id?: string | null }).customer_id).filter(Boolean))] as string[];
-      const spByCust = new Map<string, string>();
-      for (const part of chunk(custIds, 150)) {
-        const { data, error } = await supabase.from("shopify_customers").select("id, sp_assigned").in("id", part);
-        if (error) throw error;
-        for (const c of data ?? []) {
-          const row = c as { id: string; sp_assigned?: string | null };
-          spByCust.set(row.id, String(row.sp_assigned || "Unassigned"));
+      const orders = await paginateOrdersInRange(fromIso!, toIso!, "id, customer_id, shopify_customer_id, total");
+      const customerIdByShopifyCustomerId = new Map<string, string>();
+      const { data: allCustomers, error: customerMapError } = await supabase
+        .from("shopify_customers")
+        .select("id, shopify_customer_id");
+      if (customerMapError) throw customerMapError;
+      for (const c of allCustomers ?? []) {
+        const row = c as { id: string; shopify_customer_id?: string | null };
+        if (row.shopify_customer_id) customerIdByShopifyCustomerId.set(row.shopify_customer_id, row.id);
+      }
+
+      const customerIds = new Set<string>();
+      for (const order of orders) {
+        const r = order as { customer_id?: string | null; shopify_customer_id?: string | null };
+        if (r.customer_id) customerIds.add(r.customer_id);
+        else if (r.shopify_customer_id) {
+          const mapped = customerIdByShopifyCustomerId.get(r.shopify_customer_id);
+          if (mapped) customerIds.add(mapped);
         }
       }
-      const agg = new Map<string, { orders: number; revenue: number }>();
-      for (const o of orders) {
-        const r = o as { customer_id?: string | null; total?: number | null };
-        const sp = r.customer_id ? spByCust.get(r.customer_id) || "Unknown customer" : "No linked customer";
-        const p = agg.get(sp) || { orders: 0, revenue: 0 };
-        p.orders += 1;
-        p.revenue += Number(r.total || 0);
-        agg.set(sp, p);
+
+      const salespeopleByCustomer = new Map<string, string[]>();
+      for (const part of chunk([...customerIds], 200)) {
+        if (!part.length) continue;
+        const { data, error } = await (supabase as any)
+          .from("v_salesperson_customer_attribution")
+          .select("customer_id, salesperson_name")
+          .in("customer_id", part);
+        if (error) throw error;
+        for (const row of data ?? []) {
+          const customerId = String((row as { customer_id: string }).customer_id);
+          const salespersonName = String((row as { salesperson_name: string }).salesperson_name || "Unknown");
+          const list = salespeopleByCustomer.get(customerId) || [];
+          list.push(salespersonName);
+          salespeopleByCustomer.set(customerId, list);
+        }
       }
+
+      const agg = new Map<string, { orders: number; revenue: number }>();
+      for (const order of orders) {
+        const r = order as { customer_id?: string | null; shopify_customer_id?: string | null; total?: number | null };
+        const customerId = r.customer_id || (r.shopify_customer_id ? customerIdByShopifyCustomerId.get(r.shopify_customer_id) : undefined);
+        const names = customerId ? salespeopleByCustomer.get(customerId) : undefined;
+        const attributed = names?.length ? names : ["Unassigned"];
+        for (const name of attributed) {
+          const prev = agg.get(name) || { orders: 0, revenue: 0 };
+          prev.orders += 1;
+          prev.revenue += Number(r.total || 0);
+          agg.set(name, prev);
+        }
+      }
+
       const sorted = [...agg.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
       return {
-        columns: ["Salesperson (SP assigned)", "Orders", "Revenue"],
+        columns: ["Salesperson", "Orders", "Revenue"],
         rows: sorted.map(([k, v]) => [k, v.orders, Number(v.revenue.toFixed(2))]),
       };
     }
@@ -499,6 +551,35 @@ export async function fetchReportData(
       return {
         columns: ["Name", "Email", "City", "Orders", "Revenue", "Currency", "SP assigned", "Created"],
         rows: all,
+      };
+    }
+
+    case "manager_performance":
+    case "supervisor_performance":
+    case "team_performance": {
+      let query = (supabase as any)
+        .from("v_user_scope_performance")
+        .select("viewer_user_id, viewer_role, team_member_count, team_customers_count, team_orders_count, team_revenue");
+
+      // Push role filtering to SQL to avoid heavy full-view scans.
+      if (reportId === "manager_performance") {
+        query = query.eq("viewer_role", "manager");
+      } else if (reportId === "supervisor_performance") {
+        query = query.eq("viewer_role", "supervisor");
+      }
+
+      const { data, error } = await query.order("team_revenue", { ascending: false });
+      if (error) throw error;
+      return {
+        columns: ["User ID", "Role", "Team members", "Team customers", "Team orders", "Team revenue"],
+        rows: (data ?? []).map((row: Record<string, unknown>) => [
+          String(row.viewer_user_id ?? ""),
+          String(row.viewer_role ?? ""),
+          Number(row.team_member_count ?? 0),
+          Number(row.team_customers_count ?? 0),
+          Number(row.team_orders_count ?? 0),
+          Number(row.team_revenue ?? 0),
+        ]),
       };
     }
 

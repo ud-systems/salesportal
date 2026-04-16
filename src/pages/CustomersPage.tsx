@@ -15,10 +15,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
+import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 
 export default function CustomersPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [assignmentFilter, setAssignmentFilter] = useState("all");
@@ -29,9 +31,51 @@ export default function CustomersPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [preset, setPreset] = useState<DatePreset>("all");
+  const [quickRankFilter, setQuickRankFilter] = useState<"all" | "top3" | "bottom3">("all");
   const [sortBy, setSortBy] = useState<"total_revenue" | "total_orders" | "shopify_created_at" | "name">("total_revenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
+  const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
+  const fromIso = toRangeIso(range.from);
+  const toIso = toRangeIso(range.to);
+
+  useEffect(() => {
+    const saved = loadUserFilterPreset(user?.id, "customers-page", {
+      search: "",
+      cityFilter: "all",
+      assignmentFilter: "all",
+      fromDate: "",
+      toDate: "",
+      preset: "all" as DatePreset,
+      sortBy: "total_revenue" as "total_revenue" | "total_orders" | "shopify_created_at" | "name",
+      sortDir: "desc" as "asc" | "desc",
+      quickRankFilter: "all" as "all" | "top3" | "bottom3",
+    });
+    setSearch(saved.search);
+    setCityFilter(saved.cityFilter);
+    setAssignmentFilter(saved.assignmentFilter);
+    setFromDate(saved.fromDate);
+    setToDate(saved.toDate);
+    setPreset(saved.preset);
+    setSortBy(saved.sortBy);
+    setSortDir(saved.sortDir);
+    setQuickRankFilter(saved.quickRankFilter);
+  }, [user?.id]);
+
+  useEffect(() => {
+    saveUserFilterPreset(user?.id, "customers-page", {
+      search,
+      cityFilter,
+      assignmentFilter,
+      fromDate,
+      toDate,
+      preset,
+      sortBy,
+      sortDir,
+      quickRankFilter,
+    });
+  }, [user?.id, search, cityFilter, assignmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter]);
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -48,12 +92,17 @@ export default function CustomersPage() {
     search,
     cityFilter,
     assignmentFilter: assignmentFilter as "all" | "assigned" | "unassigned",
-    fromDate,
-    toDate,
+    fromDate: fromIso ? fromIso.slice(0, 10) : "",
+    toDate: toIso ? toIso.slice(0, 10) : "",
     sortBy,
     sortDir,
   });
   const customers = data?.data ?? [];
+  const customersVisible = useMemo(() => {
+    if (quickRankFilter === "all") return customers;
+    const ranked = [...customers].sort((a, b) => Number(b.total_revenue || 0) - Number(a.total_revenue || 0));
+    return quickRankFilter === "top3" ? ranked.slice(0, 3) : ranked.slice(-3);
+  }, [customers, quickRankFilter]);
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
@@ -79,7 +128,21 @@ export default function CustomersPage() {
         </div>
         <button onClick={() => setFilterOpen(true)} className="h-10 px-4 rounded-xl border bg-card font-body text-sm text-muted-foreground hover:bg-muted transition-colors tap-scale lg:hidden">Filter</button>
       </div>
-      <div className="hidden lg:grid grid-cols-1 md:grid-cols-4 gap-2">
+      <div className="hidden lg:grid grid-cols-1 md:grid-cols-5 gap-2">
+        <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+          <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+            <SelectValue placeholder="Period" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All time</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="week">Last 7 days</SelectItem>
+            <SelectItem value="month">This month</SelectItem>
+            <SelectItem value="quarter">This quarter</SelectItem>
+            <SelectItem value="year">This year</SelectItem>
+            <SelectItem value="custom">Custom</SelectItem>
+          </SelectContent>
+        </Select>
         <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
         <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
         <Select value={sortBy} onValueChange={(value: "total_revenue" | "total_orders" | "shopify_created_at" | "name") => setSortBy(value)}>
@@ -144,6 +207,9 @@ export default function CustomersPage() {
         <button onClick={() => setAssignmentFilter("all")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${assignmentFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>All Assignments</button>
         <button onClick={() => setAssignmentFilter("assigned")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${assignmentFilter === "assigned" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Assigned</button>
         <button onClick={() => setAssignmentFilter("unassigned")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${assignmentFilter === "unassigned" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Unassigned</button>
+        <button onClick={() => setQuickRankFilter("all")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>All</button>
+        <button onClick={() => setQuickRankFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
+        <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
       </div>
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Customers" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
@@ -232,7 +298,7 @@ export default function CustomersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {customers.map((c) => (
+                  {customersVisible.map((c) => (
                     <tr key={c.id} onClick={() => setSelectedCustomer(c)} className="border-b last:border-0 hover:bg-muted/50 transition-colors cursor-pointer">
                       <td className="py-3">
                         <div className="flex items-center gap-3">
@@ -261,7 +327,7 @@ export default function CustomersPage() {
           </div>
 
           <div className="md:hidden space-y-3">
-            {customers.map((c, i) => (
+            {customersVisible.map((c, i) => (
               <div key={c.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
                 <div className="flex items-center gap-3 mb-3">
                   <div className="h-10 w-10 rounded-full gradient-primary flex items-center justify-center shrink-0">
@@ -288,7 +354,7 @@ export default function CustomersPage() {
           </div>
           <div className="card-float p-3">
             <div className="flex items-center justify-between text-xs text-muted-foreground font-body px-2">
-              <span>Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalCount)} of {totalCount}</span>
+              <span>Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalCount)} of {quickRankFilter === "all" ? totalCount : customersVisible.length}</span>
               <span>Page {page} / {totalPages}</span>
             </div>
             <Pagination className="mt-2">

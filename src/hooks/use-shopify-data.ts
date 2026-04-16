@@ -2,6 +2,496 @@ import { supabase } from "@/integrations/supabase/client";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";
 import { useQuery } from "@tanstack/react-query";
 
+export type SalespersonPerformanceRow = {
+  salesperson_user_id: string;
+  salesperson_name: string;
+  customers_count: number;
+  orders_count: number;
+  revenue: number;
+};
+
+export type ViewerScopePerformanceRow = {
+  viewer_user_id: string;
+  viewer_role: string | null;
+  team_member_count: number;
+  team_customers_count: number;
+  team_orders_count: number;
+  team_revenue: number;
+};
+
+export type ScopeOrderMetrics = {
+  orders_count: number;
+  customers_count: number;
+  revenue: number;
+  avg_order_value: number;
+};
+
+export type TimeseriesPoint = {
+  label: string;
+  revenue: number;
+  orders: number;
+};
+
+export type TeamMemberOption = {
+  user_id: string;
+  label: string;
+};
+
+export function useScopeOrderMetrics(
+  viewerUserId: string | undefined,
+  fromIso?: string | null,
+  toIso?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["scope-order-metrics", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
+    queryFn: async () => {
+      if (!viewerUserId) {
+        return { orders_count: 0, customers_count: 0, revenue: 0, avg_order_value: 0 } satisfies ScopeOrderMetrics;
+      }
+      const { data, error } = await supabase.rpc("get_scope_order_metrics", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) {
+        // Keep dashboards usable even if backend RPC temporarily fails.
+        console.error("get_scope_order_metrics failed", error);
+        return { orders_count: 0, customers_count: 0, revenue: 0, avg_order_value: 0 } satisfies ScopeOrderMetrics;
+      }
+      const row = (data?.[0] ?? {}) as Partial<ScopeOrderMetrics>;
+      return {
+        orders_count: Number(row.orders_count || 0),
+        customers_count: Number(row.customers_count || 0),
+        revenue: Number(row.revenue || 0),
+        avg_order_value: Number(row.avg_order_value || 0),
+      } satisfies ScopeOrderMetrics;
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+export function useSalespersonPerformance(scopeKey = "global") {
+  return useQuery({
+    queryKey: ["salesperson-performance", scopeKey],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
+        _leader_user_id: null,
+        _leader_role: null,
+      });
+      if (error) throw error;
+      return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
+        ...row,
+        customers_count: Number(row.customers_count || 0),
+        orders_count: Number(row.orders_count || 0),
+        revenue: Number(row.revenue || 0),
+      }));
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useDirectReportSalesPerformance(
+  leaderUserId: string | undefined,
+  leaderRole: "manager" | "supervisor",
+  scopeKey = "global",
+) {
+  return useQuery({
+    queryKey: ["direct-report-sales-performance", leaderUserId ?? "none", leaderRole, scopeKey],
+    queryFn: async () => {
+      if (!leaderUserId) return [];
+      const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
+        _leader_user_id: leaderUserId,
+        _leader_role: leaderRole,
+      });
+      if (error) throw error;
+      return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
+        ...row,
+        customers_count: Number(row.customers_count || 0),
+        orders_count: Number(row.orders_count || 0),
+        revenue: Number(row.revenue || 0),
+      }));
+    },
+    staleTime: 60_000,
+    enabled: Boolean(leaderUserId),
+  });
+}
+
+export function useSupervisorManagerScopePerformance(supervisorUserId: string | undefined, scopeKey = "global") {
+  return useQuery({
+    queryKey: ["supervisor-manager-scope-performance", supervisorUserId ?? "none", scopeKey],
+    queryFn: async () => {
+      if (!supervisorUserId) return [];
+      const { data, error } = await supabase.rpc("get_supervisor_manager_scope_scorecards", {
+        _supervisor_user_id: supervisorUserId,
+      });
+      if (error) throw error;
+      return (data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[];
+    },
+    staleTime: 60_000,
+    enabled: Boolean(supervisorUserId),
+  });
+}
+
+export function useManagerTeamMemberOptions(managerUserId: string | undefined, scopeKey = "global") {
+  return useQuery({
+    queryKey: ["manager-team-member-options", managerUserId ?? "none", scopeKey],
+    queryFn: async () => {
+      if (!managerUserId) return [] as TeamMemberOption[];
+      const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
+        _leader_user_id: managerUserId,
+        _leader_role: "manager",
+      });
+      if (error) throw error;
+      return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
+        user_id: row.salesperson_user_id,
+        label: row.salesperson_name || "Salesperson",
+      }));
+    },
+    staleTime: 60_000,
+    enabled: Boolean(managerUserId),
+  });
+}
+
+export function useSupervisorManagerOptions(supervisorUserId: string | undefined, scopeKey = "global") {
+  return useQuery({
+    queryKey: ["supervisor-manager-options", supervisorUserId ?? "none", scopeKey],
+    queryFn: async () => {
+      if (!supervisorUserId) return [] as TeamMemberOption[];
+      const { data, error } = await supabase.rpc("get_supervisor_manager_scope_scorecards", {
+        _supervisor_user_id: supervisorUserId,
+      });
+      if (error) throw error;
+      return ((data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[]).map((row) => ({
+        user_id: row.viewer_user_id,
+        label: row.manager_name || "Manager",
+      }));
+    },
+    staleTime: 60_000,
+    enabled: Boolean(supervisorUserId),
+  });
+}
+
+function splitIntoChunks<T>(values: T[], chunkSize: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += chunkSize) out.push(values.slice(i, i + chunkSize));
+  return out;
+}
+
+async function fetchScopedMetricsAndSeriesBySalespeople(
+  salespersonUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  bucket: TimeseriesBucket,
+): Promise<ScopeOrderMetrics & { series: TimeseriesPoint[] }> {
+  if (!salespersonUserIds.length) {
+    return {
+      orders_count: 0,
+      customers_count: 0,
+      revenue: 0,
+      avg_order_value: 0,
+      series: [],
+    };
+  }
+
+  let assignmentRows: { customer_id: string }[] = [];
+  for (const part of splitIntoChunks(salespersonUserIds, 200)) {
+    const { data, error } = await supabase
+      .from("salesperson_customer_assignments")
+      .select("customer_id")
+      .in("salesperson_user_id", part);
+    if (error) throw error;
+    assignmentRows = assignmentRows.concat((data ?? []) as { customer_id: string }[]);
+  }
+
+  const customerIds = Array.from(new Set(assignmentRows.map((r) => r.customer_id).filter(Boolean)));
+  if (!customerIds.length) {
+    return {
+      orders_count: 0,
+      customers_count: 0,
+      revenue: 0,
+      avg_order_value: 0,
+      series: [],
+    };
+  }
+
+  let customerRows: { id: string; shopify_customer_id: string | null }[] = [];
+  for (const part of splitIntoChunks(customerIds, 200)) {
+    const { data, error } = await supabase
+      .from("shopify_customers")
+      .select("id, shopify_customer_id")
+      .in("id", part);
+    if (error) throw error;
+    customerRows = customerRows.concat((data ?? []) as { id: string; shopify_customer_id: string | null }[]);
+  }
+
+  const shopifyCustomerIds = Array.from(
+    new Set(customerRows.map((r) => r.shopify_customer_id).filter((v): v is string => Boolean(v))),
+  );
+
+  const orderMap = new Map<string, { total: number; at: string }>();
+  const absorbOrders = (rows: { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]) => {
+    for (const row of rows) {
+      if (orderMap.has(row.id)) continue;
+      const at = row.shopify_created_at || row.created_at;
+      if (!at) continue;
+      orderMap.set(row.id, { total: Number(row.total || 0), at });
+    }
+  };
+
+  for (const part of splitIntoChunks(customerIds, 200)) {
+    let query = supabase
+      .from("shopify_orders")
+      .select("id, total, shopify_created_at, created_at")
+      .in("customer_id", part);
+    if (fromIso) query = query.gte("shopify_created_at", fromIso);
+    if (toIso) query = query.lte("shopify_created_at", toIso);
+    const { data, error } = await query;
+    if (error) throw error;
+    absorbOrders((data ?? []) as { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]);
+  }
+
+  for (const part of splitIntoChunks(shopifyCustomerIds, 200)) {
+    let query = supabase
+      .from("shopify_orders")
+      .select("id, total, shopify_created_at, created_at")
+      .is("customer_id", null)
+      .in("shopify_customer_id", part);
+    if (fromIso) query = query.gte("shopify_created_at", fromIso);
+    if (toIso) query = query.lte("shopify_created_at", toIso);
+    const { data, error } = await query;
+    if (error) throw error;
+    absorbOrders((data ?? []) as { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]);
+  }
+
+  const seriesMap = new Map<string, TimeseriesPoint & { sortKey: string }>();
+  let revenue = 0;
+  let ordersCount = 0;
+
+  for (const [, order] of orderMap) {
+    revenue += order.total;
+    ordersCount += 1;
+    const date = new Date(order.at);
+    let key: string;
+    let label: string;
+    if (bucket === "day") {
+      key = date.toISOString().slice(0, 10);
+      label = new Date(key + "T12:00:00Z").toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        timeZone: "UTC",
+      });
+    } else {
+      key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+      label = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+    }
+    const prev = seriesMap.get(key) || { label, revenue: 0, orders: 0, sortKey: key };
+    prev.revenue += order.total;
+    prev.orders += 1;
+    seriesMap.set(key, prev);
+  }
+
+  const series = Array.from(seriesMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, v]) => ({ label: v.label, revenue: v.revenue, orders: v.orders }));
+
+  return {
+    orders_count: ordersCount,
+    customers_count: customerIds.length,
+    revenue,
+    avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
+    series,
+  };
+}
+
+export function useSalespeopleScopedMetricsAndSeries(
+  salespersonUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  bucket: TimeseriesBucket,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "salespeople-scoped-metrics-series",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+      bucket,
+      [...salespersonUserIds].sort().join(","),
+    ],
+    queryFn: () => fetchScopedMetricsAndSeriesBySalespeople(salespersonUserIds, fromIso, toIso, bucket),
+    staleTime: 60_000,
+    enabled: enabled && salespersonUserIds.length > 0,
+  });
+}
+
+export function useSalespeopleUnderManagers(
+  managerUserIds: string[],
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["salespeople-under-managers", scopeKey, [...managerUserIds].sort().join(",")],
+    queryFn: async () => {
+      if (!managerUserIds.length) return [] as string[];
+      let rows: { member_user_id: string }[] = [];
+      for (const part of splitIntoChunks(managerUserIds, 200)) {
+        const { data, error } = await supabase
+          .from("sales_hierarchy_edges")
+          .select("member_user_id")
+          .eq("leader_role", "manager")
+          .in("leader_user_id", part);
+        if (error) throw error;
+        rows = rows.concat((data ?? []) as { member_user_id: string }[]);
+      }
+      return Array.from(new Set(rows.map((r) => r.member_user_id).filter(Boolean)));
+    },
+    staleTime: 60_000,
+    enabled: enabled && managerUserIds.length > 0,
+  });
+}
+
+export function useAggregateScopeMetricsForViewers(
+  viewerUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "aggregate-scope-metrics-for-viewers",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+      [...viewerUserIds].sort().join(","),
+    ],
+    queryFn: async () => {
+      if (!viewerUserIds.length) {
+        return { orders_count: 0, customers_count: 0, revenue: 0, avg_order_value: 0 } satisfies ScopeOrderMetrics;
+      }
+      const metrics = await Promise.all(
+        viewerUserIds.map(async (viewerId) => {
+          const { data, error } = await supabase.rpc("get_scope_order_metrics", {
+            _viewer_user_id: viewerId,
+            _from_iso: fromIso ?? null,
+            _to_iso: toIso ?? null,
+          });
+          if (error) throw error;
+          const row = (data?.[0] ?? {}) as Partial<ScopeOrderMetrics>;
+          return {
+            orders_count: Number(row.orders_count || 0),
+            customers_count: Number(row.customers_count || 0),
+            revenue: Number(row.revenue || 0),
+          };
+        }),
+      );
+      const totals = metrics.reduce(
+        (acc, row) => {
+          acc.orders_count += row.orders_count;
+          acc.customers_count += row.customers_count;
+          acc.revenue += row.revenue;
+          return acc;
+        },
+        { orders_count: 0, customers_count: 0, revenue: 0 },
+      );
+      return {
+        ...totals,
+        avg_order_value: totals.orders_count > 0 ? totals.revenue / totals.orders_count : 0,
+      } satisfies ScopeOrderMetrics;
+    },
+    staleTime: 60_000,
+    enabled: enabled && viewerUserIds.length > 0,
+  });
+}
+
+export function useSupervisorSelectedManagerTimeseries(
+  supervisorUserId: string | undefined,
+  managerUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  bucket: TimeseriesBucket,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "supervisor-selected-manager-timeseries",
+      scopeKey,
+      supervisorUserId ?? "none",
+      fromIso ?? "none",
+      toIso ?? "none",
+      bucket,
+      [...managerUserIds].sort().join(","),
+    ],
+    queryFn: async () => {
+      if (!supervisorUserId || !managerUserIds.length) return [] as TimeseriesPoint[];
+      const { data, error } = await (supabase as any).rpc("get_supervisor_selected_manager_timeseries", {
+        _supervisor_user_id: supervisorUserId,
+        _manager_user_ids: managerUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+        _bucket: bucket,
+      });
+      if (error) throw error;
+      return ((data ?? []) as { bucket_label?: string; revenue?: number; orders_count?: number }[]).map((row) => ({
+        label: String(row.bucket_label ?? ""),
+        revenue: Number(row.revenue || 0),
+        orders: Number(row.orders_count || 0),
+      }));
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(supervisorUserId) && managerUserIds.length > 0,
+  });
+}
+
+export function useManagerSelectedSalespeopleTimeseries(
+  managerUserId: string | undefined,
+  salespersonUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  bucket: TimeseriesBucket,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "manager-selected-salespeople-timeseries",
+      scopeKey,
+      managerUserId ?? "none",
+      fromIso ?? "none",
+      toIso ?? "none",
+      bucket,
+      [...salespersonUserIds].sort().join(","),
+    ],
+    queryFn: async () => {
+      if (!managerUserId || !salespersonUserIds.length) return [] as TimeseriesPoint[];
+      const { data, error } = await (supabase as any).rpc("get_manager_selected_salespeople_timeseries", {
+        _manager_user_id: managerUserId,
+        _salesperson_user_ids: salespersonUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+        _bucket: bucket,
+      });
+      if (error) throw error;
+      return ((data ?? []) as { bucket_label?: string; revenue?: number; orders_count?: number }[]).map((row) => ({
+        label: String(row.bucket_label ?? ""),
+        revenue: Number(row.revenue || 0),
+        orders: Number(row.orders_count || 0),
+      }));
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(managerUserId) && salespersonUserIds.length > 0,
+  });
+}
+
 type CustomerQueryParams = {
   page: number;
   pageSize: number;
@@ -390,6 +880,43 @@ export function useOrdersTimeseriesInRange(
     },
     staleTime: 60_000,
     enabled: enabled && Boolean(fromIso && toIso),
+  });
+}
+
+export function useScopeOrderTimeseries(
+  viewerUserId: string | undefined,
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  bucket: TimeseriesBucket,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "scope-order-timeseries",
+      viewerUserId ?? "none",
+      fromIso ?? "none",
+      toIso ?? "none",
+      bucket,
+      scopeKey,
+    ],
+    queryFn: async () => {
+      if (!viewerUserId) return [] as TimeseriesPoint[];
+      const { data, error } = await (supabase as any).rpc("get_scope_order_timeseries", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+        _bucket: bucket,
+      });
+      if (error) throw error;
+      return ((data ?? []) as { bucket_label?: string; revenue?: number; orders_count?: number }[]).map((row) => ({
+        label: String(row.bucket_label ?? ""),
+        revenue: Number(row.revenue || 0),
+        orders: Number(row.orders_count || 0),
+      }));
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId),
   });
 }
 

@@ -2,15 +2,12 @@ import { DollarSign, ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  useCustomersCount,
-  useCustomersCountInRange,
-  useOrdersCount,
   useOrdersMetricsInRange,
-  useOrdersTotalRevenue,
   useRecentOrders,
   useRecentOrdersInRange,
   useRevenueByMonthForYear,
   useOrdersTimeseriesInRange,
+  useScopeOrderMetrics,
   useTopCustomers,
 } from "@/hooks/use-shopify-data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -48,9 +45,13 @@ export default function DashboardPage() {
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
 
-  const { data: totalCustomersAll = 0, isLoading: loadingCustomersAll } = useCustomersCount(scopeKey);
-  const { data: totalOrdersAll = 0, isLoading: loadingOrdersAll } = useOrdersCount(scopeKey);
-  const { data: totalRevenueAll = 0, isLoading: loadingRevenueAll } = useOrdersTotalRevenue(scopeKey);
+  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(user?.id, null, null, Boolean(user?.id));
+  const { data: rangeMetrics, isLoading: loadingRangeMetrics } = useScopeOrderMetrics(
+    user?.id,
+    fromIso,
+    toIso,
+    !isAll && Boolean(user?.id),
+  );
   const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(5, scopeKey);
   const { data: monthlyRevenue = [], isLoading: loadingRevenueByMonth } = useRevenueByMonthForYear(year, scopeKey);
 
@@ -65,12 +66,6 @@ export default function DashboardPage() {
     cmpToIso,
     scopeKey,
     !isAll && Boolean(cmpFromIso && cmpToIso),
-  );
-  const { data: customersRange = 0, isLoading: loadingCustomersRange } = useCustomersCountInRange(
-    fromIso,
-    toIso,
-    scopeKey,
-    !isAll,
   );
   const { data: seriesRange = [], isLoading: loadingSeries } = useOrdersTimeseriesInRange(
     fromIso,
@@ -89,17 +84,17 @@ export default function DashboardPage() {
 
   const { data: topCustomers = [], isLoading: loadingTopCustomers } = useTopCustomers(3, scopeKey);
 
-  const totalRevenue = isAll ? totalRevenueAll : (metricsRange?.revenue ?? 0);
-  const totalOrders = isAll ? totalOrdersAll : (metricsRange?.count ?? 0);
-  const totalCustomers = isAll ? totalCustomersAll : customersRange;
+  const totalRevenue = isAll ? (allMetrics?.revenue ?? 0) : (rangeMetrics?.revenue ?? 0);
+  const totalOrders = isAll ? (allMetrics?.orders_count ?? 0) : (rangeMetrics?.orders_count ?? 0);
+  const totalCustomers = isAll ? (allMetrics?.customers_count ?? 0) : (rangeMetrics?.customers_count ?? 0);
   const recentOrders = isAll ? recentOrdersAll : recentFiltered;
 
-  const loadingRevenueTotal = isAll ? loadingRevenueAll : loadingMetricsRange;
-  const loadingOrdersCount = isAll ? loadingOrdersAll : loadingMetricsRange;
-  const loadingCustomersCount = isAll ? loadingCustomersAll : loadingCustomersRange;
+  const loadingRevenueTotal = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const loadingOrdersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const loadingCustomersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
 
-  const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
+  const avgOrderValue = isAll ? (allMetrics?.avg_order_value ?? 0) : (rangeMetrics?.avg_order_value ?? 0);
 
   const revenueDataAll = useMemo(() => {
     const months = monthlyRevenue || [];
@@ -303,8 +298,15 @@ export default function DashboardPage() {
             <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
               <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
               <div className="flex-1 min-h-[220px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                   <AreaChart data={chartData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="dashboardOrdersGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.36} />
+                        <stop offset="65%" stopColor="hsl(var(--primary))" stopOpacity={0.14} />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis
                       dataKey="label"
@@ -326,8 +328,10 @@ export default function DashboardPage() {
                       type="monotone"
                       dataKey="orders"
                       stroke="hsl(var(--primary))"
-                      fill="hsl(var(--primary) / 0.15)"
-                      strokeWidth={2}
+                      fill="url(#dashboardOrdersGradient)"
+                      fillOpacity={1}
+                      strokeWidth={2.5}
+                      activeDot={{ r: 4 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>

@@ -394,6 +394,33 @@ export type Database = {
           },
         ]
       }
+      sales_hierarchy_edges: {
+        Row: {
+          created_at: string
+          id: string
+          leader_role: Database["public"]["Enums"]["app_role"]
+          leader_user_id: string
+          member_user_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          leader_role: Database["public"]["Enums"]["app_role"]
+          leader_user_id: string
+          member_user_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          leader_role?: Database["public"]["Enums"]["app_role"]
+          leader_user_id?: string
+          member_user_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       salesperson_customer_assignments: {
         Row: {
           id: string
@@ -578,6 +605,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_salesperson_performance_rows: {
+        Args: { _leader_user_id?: string; _leader_role?: string }
+        Returns: {
+          salesperson_user_id: string
+          salesperson_name: string
+          customers_count: number
+          orders_count: number
+          revenue: number
+        }[]
+      }
+      get_scope_order_metrics: {
+        Args: { _viewer_user_id: string; _from_iso?: string; _to_iso?: string }
+        Returns: {
+          orders_count: number
+          customers_count: number
+          revenue: number
+          avg_order_value: number
+        }[]
+      }
+      get_user_scope_user_ids: { Args: { _user_id: string }; Returns: string[] }
       get_salesperson_name: { Args: { _user_id: string }; Returns: string }
       has_role: {
         Args: {
@@ -588,7 +635,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "salesperson"
+      app_role: "admin" | "supervisor" | "manager" | "salesperson"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -716,7 +763,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "salesperson"],
+      app_role: ["admin", "supervisor", "manager", "salesperson"],
     },
   },
 } as const

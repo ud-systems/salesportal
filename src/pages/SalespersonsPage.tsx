@@ -1,4 +1,4 @@
-import { useCustomers } from "@/hooks/use-shopify-data";
+import { useSalespersonPerformance } from "@/hooks/use-shopify-data";
 import { Users, DollarSign } from "lucide-react";
 import { useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,20 +15,19 @@ function initials(name: string) {
 
 export default function SalespersonsPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
-  const { data: customers, isLoading } = useCustomers();
+  const { data: salespersons = [], isLoading } = useSalespersonPerformance("admin");
 
-  // Derive salesperson summaries from customers (admin sees all)
-  const salespersons = useMemo(() => {
-    const map: Record<string, { name: string; customers: number; revenue: number }> = {};
-    for (const c of customers || []) {
-      if (c.sp_assigned && c.sp_assigned !== "Unassigned") {
-        if (!map[c.sp_assigned]) map[c.sp_assigned] = { name: c.sp_assigned, customers: 0, revenue: 0 };
-        map[c.sp_assigned].customers++;
-        map[c.sp_assigned].revenue += Number(c.total_revenue || 0);
-      }
-    }
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue);
-  }, [customers]);
+  const rows = useMemo(
+    () =>
+      salespersons.map((sp) => ({
+        key: sp.salesperson_user_id,
+        name: sp.salesperson_name,
+        customers: Number(sp.customers_count || 0),
+        orders: Number(sp.orders_count || 0),
+        revenue: Number(sp.revenue || 0),
+      })),
+    [salespersons],
+  );
 
   return (
     <div className="space-y-5 max-w-[1200px]">
@@ -56,7 +55,7 @@ export default function SalespersonsPage() {
             </div>
           </div>
         </>
-      ) : salespersons.length === 0 ? (
+      ) : rows.length === 0 ? (
         <div className="card-float p-10 text-center opacity-0 animate-fade-in">
           <p className="text-muted-foreground font-body">No salesperson data. Sync customers from Shopify first.</p>
         </div>
@@ -69,13 +68,14 @@ export default function SalespersonsPage() {
                   <tr className="border-b text-muted-foreground">
                     <th className="text-left py-2.5 font-medium">Salesperson</th>
                     <th className="text-right py-2.5 font-medium">Customers</th>
+                    <th className="text-right py-2.5 font-medium">Orders</th>
                     <th className="text-right py-2.5 font-medium">Revenue</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {salespersons.map((sp, i) => (
+                  {rows.map((sp, i) => (
                     <tr
-                      key={sp.name}
+                      key={sp.key}
                       className="border-b last:border-0 hover:bg-muted/50 transition-colors opacity-0 animate-fade-in"
                       style={{ animationDelay: `${100 + i * 40}ms` }}
                     >
@@ -88,6 +88,7 @@ export default function SalespersonsPage() {
                         </div>
                       </td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.customers}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{sp.orders}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.revenue), null, storeCurrency)}</td>
                     </tr>
                   ))}
@@ -97,8 +98,8 @@ export default function SalespersonsPage() {
           </div>
 
           <div className="md:hidden space-y-3">
-            {salespersons.map((sp, i) => (
-              <div key={sp.name} className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: `${50 + i * 80}ms` }}>
+            {rows.map((sp, i) => (
+              <div key={sp.key} className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: `${50 + i * 80}ms` }}>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="h-12 w-12 rounded-full gradient-primary flex items-center justify-center shrink-0">
                     <span className="text-primary-foreground text-sm font-bold font-heading">{initials(sp.name)}</span>
@@ -107,11 +108,16 @@ export default function SalespersonsPage() {
                     <h3 className="font-heading font-semibold text-foreground truncate">{sp.name}</h3>
                   </div>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <Users className="h-4 w-4 text-primary mx-auto mb-1" />
                     <p className="text-lg font-heading font-bold text-foreground">{sp.customers}</p>
                     <p className="text-[10px] text-muted-foreground font-body">Customers</p>
+                  </div>
+                  <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
+                    <Users className="h-4 w-4 text-primary mx-auto mb-1" />
+                    <p className="text-lg font-heading font-bold text-foreground">{sp.orders}</p>
+                    <p className="text-[10px] text-muted-foreground font-body">Orders</p>
                   </div>
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <DollarSign className="h-4 w-4 text-primary mx-auto mb-1" />

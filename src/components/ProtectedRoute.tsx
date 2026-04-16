@@ -2,14 +2,16 @@ import { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth, UserRole } from "@/contexts/AuthContext";
 import { Loader2 } from "lucide-react";
+import type { AppCapability } from "@/lib/auth-capabilities";
 
 interface ProtectedRouteProps {
   children: ReactNode;
   allowedRoles?: UserRole[];
+  requiredCapabilities?: AppCapability[];
 }
 
-export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, loading } = useAuth();
+export function ProtectedRoute({ children, allowedRoles, requiredCapabilities }: ProtectedRouteProps) {
+  const { user, loading, hasCapability } = useAuth();
 
   if (loading) {
     return (
@@ -24,6 +26,10 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (requiredCapabilities?.length && !requiredCapabilities.every((capability) => hasCapability(capability))) {
     return <Navigate to="/dashboard" replace />;
   }
 

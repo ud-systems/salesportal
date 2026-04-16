@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { useOrderItems, useOrdersPaginated } from "@/hooks/use-shopify-data";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -12,8 +12,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSearchParams } from "react-router-dom";
 import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
+import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function OrdersPage() {
+  const { user } = useAuth();
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [searchParams] = useSearchParams();
   const initialFulfillment = (() => {
@@ -30,13 +34,69 @@ export default function OrdersPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [preset, setPreset] = useState<DatePreset>("all");
+  const [quickRankFilter, setQuickRankFilter] = useState<"all" | "top3" | "bottom3">("all");
   const [sortBy, setSortBy] = useState<"shopify_created_at" | "processed_at" | "total" | "order_number">("shopify_created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
+  const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
+  const fromIso = toRangeIso(range.from);
+  const toIso = toRangeIso(range.to);
+
+  useEffect(() => {
+    const saved = loadUserFilterPreset(user?.id, "orders-page", {
+      search: "",
+      statusFilter: "all",
+      fulfillmentFilter: initialFulfillment,
+      fromDate: "",
+      toDate: "",
+      preset: "all" as DatePreset,
+      sortBy: "shopify_created_at" as "shopify_created_at" | "processed_at" | "total" | "order_number",
+      sortDir: "desc" as "asc" | "desc",
+      quickRankFilter: "all" as "all" | "top3" | "bottom3",
+    });
+    setSearch(saved.search);
+    setStatusFilter(saved.statusFilter);
+    setFulfillmentFilter(saved.fulfillmentFilter);
+    setFromDate(saved.fromDate);
+    setToDate(saved.toDate);
+    setPreset(saved.preset);
+    setSortBy(saved.sortBy);
+    setSortDir(saved.sortDir);
+    setQuickRankFilter(saved.quickRankFilter);
+  }, [initialFulfillment, user?.id]);
+
+  useEffect(() => {
+    saveUserFilterPreset(user?.id, "orders-page", {
+      search,
+      statusFilter,
+      fulfillmentFilter,
+      fromDate,
+      toDate,
+      preset,
+      sortBy,
+      sortDir,
+      quickRankFilter,
+    });
+  }, [user?.id, search, statusFilter, fulfillmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter]);
+
   const { data, isLoading } = useOrdersPaginated({
-    page, pageSize, search, statusFilter, fulfillmentFilter, fromDate, toDate, sortBy, sortDir,
+    page,
+    pageSize,
+    search,
+    statusFilter,
+    fulfillmentFilter,
+    fromDate: fromIso ? fromIso.slice(0, 10) : "",
+    toDate: toIso ? toIso.slice(0, 10) : "",
+    sortBy,
+    sortDir,
   });
   const orders = data?.data ?? [];
+  const ordersVisible = useMemo(() => {
+    if (quickRankFilter === "all") return orders;
+    const ranked = [...orders].sort((a, b) => Number(b.total || 0) - Number(a.total || 0));
+    return quickRankFilter === "top3" ? ranked.slice(0, 3) : ranked.slice(-3);
+  }, [orders, quickRankFilter]);
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const { data: selectedItems } = useOrderItems(selectedOrder?.id);
@@ -71,7 +131,21 @@ export default function OrdersPage() {
         </div>
         <button onClick={() => setFilterOpen(true)} className="h-10 px-4 rounded-xl border bg-card font-body text-sm text-muted-foreground hover:bg-muted transition-colors tap-scale lg:hidden">Filter</button>
       </div>
-      <div className="hidden lg:grid grid-cols-1 md:grid-cols-4 gap-2">
+      <div className="hidden lg:grid grid-cols-1 md:grid-cols-5 gap-2">
+        <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+          <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+            <SelectValue placeholder="Period" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All time</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="week">Last 7 days</SelectItem>
+            <SelectItem value="month">This month</SelectItem>
+            <SelectItem value="quarter">This quarter</SelectItem>
+            <SelectItem value="year">This year</SelectItem>
+            <SelectItem value="custom">Custom</SelectItem>
+          </SelectContent>
+        </Select>
         <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
         <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
         <Select value={sortBy} onValueChange={(value: "shopify_created_at" | "processed_at" | "total" | "order_number") => setSortBy(value)}>
@@ -107,6 +181,9 @@ export default function OrdersPage() {
             {s === "all" ? "All Fulfillment" : s.replace("_", " ")}
           </button>
         ))}
+        <button onClick={() => setQuickRankFilter("all")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>All</button>
+        <button onClick={() => setQuickRankFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
+        <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
       </div>
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Orders" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
@@ -177,7 +254,7 @@ export default function OrdersPage() {
               <table className="w-full text-sm font-body">
                 <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Order #</th><th className="text-left py-2.5 font-medium">Customer</th><th className="text-right py-2.5 font-medium">Amount</th><th className="text-left py-2.5 font-medium">Payment</th><th className="text-left py-2.5 font-medium">Fulfillment</th><th className="text-left py-2.5 font-medium">Date</th></tr></thead>
                 <tbody>
-                  {orders.map((o) => (
+                  {ordersVisible.map((o) => (
                     <tr key={o.id} onClick={() => setSelectedOrder(o)} className="border-b last:border-0 hover:bg-muted/50 transition-colors cursor-pointer">
                       <td className="py-3 font-medium text-foreground">{o.order_number || o.shopify_order_id}</td>
                       <td className="py-3 text-muted-foreground">{o.customer_name}</td>
@@ -195,7 +272,7 @@ export default function OrdersPage() {
           </div>
 
           <div className="md:hidden space-y-3">
-            {orders.map((o, i) => (
+            {ordersVisible.map((o, i) => (
               <div key={o.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
                 <div className="flex items-start justify-between mb-2">
                   <div><p className="font-medium text-foreground text-sm">{o.order_number || o.shopify_order_id}</p><p className="text-xs text-muted-foreground mt-0.5">{o.customer_name}</p></div>
@@ -213,7 +290,7 @@ export default function OrdersPage() {
           </div>
           <div className="card-float p-3">
             <div className="flex items-center justify-between text-xs text-muted-foreground font-body px-2">
-              <span>Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalCount)} of {totalCount}</span>
+              <span>Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalCount)} of {quickRankFilter === "all" ? totalCount : ordersVisible.length}</span>
               <span>Page {page} / {totalPages}</span>
             </div>
             <Pagination className="mt-2">

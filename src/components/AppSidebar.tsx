@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import type { AppCapability } from "@/lib/auth-capabilities";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +28,7 @@ const salespersonNav = [
   { title: "Inventory", url: "/inventory", icon: Boxes },
 ];
 
-const adminNav = [
+const oversightNav: ({ title: string; url: string; icon: typeof LayoutDashboard; capability?: AppCapability })[] = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Customers", url: "/customers", icon: Users },
@@ -36,19 +37,23 @@ const adminNav = [
   { title: "Collections", url: "/collections", icon: FolderTree },
   { title: "Purchase Orders", url: "/purchase-orders", icon: ClipboardList },
   { title: "Inventory", url: "/inventory", icon: Boxes },
-  { title: "Salespersons", url: "/salespersons", icon: UserCheck },
-  { title: "Sync Logs", url: "/sync-logs", icon: RefreshCw },
-  { title: "Webhook Monitor", url: "/webhook-monitor", icon: RadioTower },
-  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Salespersons", url: "/salespersons", icon: UserCheck, capability: "view_salespersons_page" },
+  { title: "Sync Logs", url: "/sync-logs", icon: RefreshCw, capability: "view_sync_logs" },
+  { title: "Webhook Monitor", url: "/webhook-monitor", icon: RadioTower, capability: "view_webhook_monitor" },
+  { title: "Settings", url: "/settings", icon: Settings, capability: "manage_settings" },
 ];
 
 export function AppSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navScrollProgress, setNavScrollProgress] = useState(0);
   const [hasNavOverflow, setHasNavOverflow] = useState(false);
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, hasCapability } = useAuth();
   const navigate = useNavigate();
-  const navItems = isAdmin ? adminNav : salespersonNav;
+  const navItems = hasCapability("view_org_dashboard")
+    ? oversightNav.filter((item) => !item.capability || hasCapability(item.capability))
+    : hasCapability("view_salespersons_page")
+      ? [...salespersonNav, { title: "Salespersons", url: "/salespersons", icon: UserCheck }]
+      : salespersonNav;
   const navRef = useRef<HTMLElement | null>(null);
 
   const updateNavScrollState = useCallback(() => {
