@@ -288,18 +288,20 @@ export default function OrdersPage() {
               </div>
             ))}
           </div>
-          <div className="card-float p-3">
-            <div className="flex items-center justify-between text-xs text-muted-foreground font-body px-2">
-              <span>Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalCount)} of {quickRankFilter === "all" ? totalCount : ordersVisible.length}</span>
+          <div className="card-float p-3 overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs text-muted-foreground font-body px-2">
+              <span className="truncate">Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalCount)} of {quickRankFilter === "all" ? totalCount : ordersVisible.length}</span>
               <span>Page {page} / {totalPages}</span>
             </div>
-            <Pagination className="mt-2">
+            <Pagination className="mt-2 px-1">
               <PaginationContent>
                 <PaginationItem>
                   <PaginationPrevious href="#" onClick={(e) => { e.preventDefault(); if (page > 1) setPage(page - 1); }} className={page <= 1 ? "pointer-events-none opacity-50" : ""} />
                 </PaginationItem>
-                {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
-                  const start = Math.max(1, Math.min(page - 2, totalPages - 4));
+                {Array.from({ length: Math.min(isMobile ? 3 : 5, totalPages) }).map((_, i) => {
+                  const radius = isMobile ? 1 : 2;
+                  const maxWindow = isMobile ? 3 : 5;
+                  const start = Math.max(1, Math.min(page - radius, totalPages - (maxWindow - 1)));
                   const pageNum = start + i;
                   if (pageNum > totalPages) return null;
                   return (
