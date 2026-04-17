@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import {
   useCustomerCities,
-  useCustomerIdsForSalespeople,
   useCustomersPaginated,
   useSalespeopleUnderManagers,
   useSupervisorManagerOptions,
@@ -46,6 +45,8 @@ export default function CustomersPage() {
   const [selectedSalespersonId, setSelectedSalespersonId] = useState("all");
   const [sortBy, setSortBy] = useState<"total_revenue" | "total_orders" | "shopify_created_at" | "name">("total_revenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [showAllNoteFields, setShowAllNoteFields] = useState(false);
+  const [showRawNote, setShowRawNote] = useState(false);
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
   const fromIso = toRangeIso(range.from);
@@ -120,13 +121,7 @@ export default function CustomersPage() {
     }
     return false;
   }, [isSupervisor, scopeMode, selectedManagerId, selectedSalespersonId]);
-  const shouldLoadScopedCustomerIds = shouldApplyExplicitScopeFilters && scopedSalespersonIds.length > 0;
-  const {
-    data: scopedCustomerIds = [],
-    isLoading: isScopeCustomersLoading,
-    isFetching: isScopeCustomersFetching,
-  } = useCustomerIdsForSalespeople(scopedSalespersonIds, "customers-page", shouldLoadScopedCustomerIds);
-  const isScopeCustomersReady = !shouldLoadScopedCustomerIds || (!isScopeCustomersLoading && !isScopeCustomersFetching);
+  const isScopeCustomersReady = true;
 
   useEffect(() => {
     const saved = loadUserFilterPreset(user?.id, "customers-page", {
@@ -193,7 +188,7 @@ export default function CustomersPage() {
     toDate: toIso ? toIso.slice(0, 10) : "",
     sortBy,
     sortDir,
-    scopeCustomerIds: shouldApplyExplicitScopeFilters ? scopedCustomerIds : undefined,
+    scopeSalespersonIds: shouldApplyExplicitScopeFilters ? scopedSalespersonIds : undefined,
     scopeOwnerNames: shouldApplyExplicitScopeFilters ? scopedOwnerNames : undefined,
     forceScopedFilter: shouldApplyExplicitScopeFilters,
     enabled: isScopeCustomersReady,
@@ -216,6 +211,30 @@ export default function CustomersPage() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  const parseCustomerNoteFields = (note: string | null | undefined) => {
+    if (!note) return [] as Array<{ label: string; value: string }>;
+    const normalized = note.replace(/\s+/g, " ").trim();
+    if (!normalized) return [] as Array<{ label: string; value: string }>;
+
+    const labelRegex = /([A-Za-z][A-Za-z0-9 ()/&?'+-]{1,40}):/g;
+    const matches = Array.from(normalized.matchAll(labelRegex));
+    if (!matches.length) return [] as Array<{ label: string; value: string }>;
+
+    const fields: Array<{ label: string; value: string }> = [];
+    for (let i = 0; i < matches.length; i += 1) {
+      const current = matches[i];
+      const next = matches[i + 1];
+      const rawLabel = (current[1] || "").trim();
+      const valueStart = (current.index ?? 0) + current[0].length;
+      const valueEnd = next?.index ?? normalized.length;
+      const rawValue = normalized.slice(valueStart, valueEnd).trim();
+      if (!rawLabel || !rawValue) continue;
+      if (rawLabel.toLowerCase() === "note") continue;
+      fields.push({ label: rawLabel, value: rawValue });
+    }
+    return fields;
+  };
 
   return (
     <div className="w-full space-y-5">
@@ -553,13 +572,27 @@ export default function CustomersPage() {
         </>
       )}
 
-      <Sheet open={!!selectedCustomer} onOpenChange={(open) => !open && setSelectedCustomer(null)}>
+      <Sheet
+        open={!!selectedCustomer}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedCustomer(null);
+            setShowAllNoteFields(false);
+            setShowRawNote(false);
+          }
+        }}
+      >
         <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Customer Details</SheetTitle>
           </SheetHeader>
           {selectedCustomer && (
             <div className="space-y-4 mt-4 font-body text-sm">
+              {(() => {
+                const noteFields = parseCustomerNoteFields(selectedCustomer.customer_note);
+                const visibleNoteFields = showAllNoteFields ? noteFields : noteFields.slice(0, 8);
+                return (
+                  <>
               <div className="rounded-xl border bg-card p-4">
                 <p className="text-lg font-semibold text-foreground">{selectedCustomer.name}</p>
                 <p className="text-muted-foreground">{selectedCustomer.email || "No email"} · {selectedCustomer.phone || "No phone"}</p>
@@ -568,21 +601,68 @@ export default function CustomersPage() {
                 <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Orders</p><p className="font-semibold">{selectedCustomer.total_orders || 0}</p></div>
                 <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-semibold">{formatOrderMoney(Number(selectedCustomer.total_revenue || 0), selectedCustomer.spend_currency, storeCurrency)}</p></div>
               </div>
-              <div className="rounded-xl border p-4 space-y-2">
-                <p><span className="text-muted-foreground">Store:</span> {selectedCustomer.store_name || "—"}</p>
-                <p><span className="text-muted-foreground">City:</span> {selectedCustomer.city || "—"}</p>
-                <p><span className="text-muted-foreground">Address:</span> {[selectedCustomer.address1, selectedCustomer.address2, selectedCustomer.province, selectedCustomer.country, selectedCustomer.zip].filter(Boolean).join(", ") || "—"}</p>
-                <p><span className="text-muted-foreground">Salesperson:</span> {selectedCustomer.sp_assigned || "Unassigned"}</p>
-                <p><span className="text-muted-foreground">Referred by:</span> {selectedCustomer.referred_by || "—"}</p>
-                <p><span className="text-muted-foreground">Account state:</span> {selectedCustomer.account_state || "—"}</p>
-                <p><span className="text-muted-foreground">Locale:</span> {selectedCustomer.locale || "—"}</p>
-                <p><span className="text-muted-foreground">Note:</span> {selectedCustomer.customer_note || "—"}</p>
+              <div className="rounded-xl border p-4 space-y-3">
+                <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Profile</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><p className="text-xs text-muted-foreground">Store</p><p className="text-foreground break-words">{selectedCustomer.store_name || "—"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">City</p><p className="text-foreground break-words">{selectedCustomer.city || "—"}</p></div>
+                  <div className="sm:col-span-2"><p className="text-xs text-muted-foreground">Address</p><p className="text-foreground break-words">{[selectedCustomer.address1, selectedCustomer.address2, selectedCustomer.province, selectedCustomer.country, selectedCustomer.zip].filter(Boolean).join(", ") || "—"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Salesperson</p><p className="text-foreground break-words">{selectedCustomer.sp_assigned || "Unassigned"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Referred by</p><p className="text-foreground break-words">{selectedCustomer.referred_by || "—"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Account state</p><p className="text-foreground break-words">{selectedCustomer.account_state || "—"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Locale</p><p className="text-foreground break-words">{selectedCustomer.locale || "—"}</p></div>
+                </div>
+              </div>
+              <div className="rounded-xl border p-4 space-y-3">
+                <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Additional details</p>
+                {noteFields.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {visibleNoteFields.map((field) => (
+                        <div key={`${field.label}-${field.value.slice(0, 30)}`} className="rounded-lg border bg-muted/20 px-3 py-2">
+                          <p className="text-xs text-muted-foreground">{field.label}</p>
+                          <p className="text-foreground break-words">{field.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {noteFields.length > 8 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllNoteFields((prev) => !prev)}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        {showAllNoteFields ? "Show fewer fields" : `Show all fields (${noteFields.length})`}
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-muted-foreground whitespace-pre-wrap break-words">{selectedCustomer.customer_note || "—"}</p>
+                )}
+                {selectedCustomer.customer_note && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowRawNote((prev) => !prev)}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      {showRawNote ? "Hide raw note" : "View raw note"}
+                    </button>
+                    {showRawNote && (
+                      <pre className="mt-2 max-h-56 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs whitespace-pre-wrap break-words">
+                        {selectedCustomer.customer_note}
+                      </pre>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end">
                 <SheetClose asChild>
                   <Button variant="outline" className="rounded-xl">Close</Button>
                 </SheetClose>
               </div>
+                  </>
+                );
+              })()}
             </div>
           )}
         </SheetContent>

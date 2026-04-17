@@ -17,6 +17,16 @@ import {
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
 
+const isDev = (Deno.env.get("ENV") || Deno.env.get("DENO_ENV") || "").toLowerCase() === "development";
+const devError = (...args: unknown[]) => {
+  if (!isDev) return;
+  console.error(...args);
+};
+const devWarn = (...args: unknown[]) => {
+  if (!isDev) return;
+  console.warn(...args);
+};
+
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let out = 0;
@@ -107,7 +117,7 @@ async function upsertSalespersonAssignments(
     const { error } = await supabase.from("salesperson_customer_assignments").upsert(row, {
       onConflict: "customer_id,salesperson_user_id",
     });
-    if (error) console.error("salesperson_customer_assignments upsert:", error.message, row);
+    if (error) devError("salesperson_customer_assignments upsert:", error.message, row);
   }
 }
 
@@ -197,7 +207,7 @@ Deno.serve(async (req) => {
       .update({ records_synced: count })
       .eq("id", logId)
       .eq("status", "running");
-    if (error) console.error("sync_logs progress update failed:", error.message, { logId, count });
+    if (error) devError("sync_logs progress update failed:", error.message, { logId, count });
   };
 
   /** Mark abandoned "running" rows so UI does not spin forever after timeouts/crashes */
@@ -236,7 +246,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (error) {
       checkpointUnavailable = true;
-      console.error("sync_checkpoints read failed:", error.message, { syncType });
+      devError("sync_checkpoints read failed:", error.message, { syncType });
     }
     return {
       cursor: data?.cursor || null,
@@ -253,7 +263,7 @@ Deno.serve(async (req) => {
     const { error } = await supabase.from("sync_checkpoints").upsert(payload, { onConflict: "sync_type" });
     if (error) {
       checkpointUnavailable = true;
-      console.error("sync_checkpoints upsert failed:", error.message, { syncType, cursor, completed });
+      devError("sync_checkpoints upsert failed:", error.message, { syncType, cursor, completed });
     }
   };
   const isInvalidCursorError = (err: unknown) => {
@@ -283,7 +293,7 @@ Deno.serve(async (req) => {
         },
         { onConflict: "sync_type" },
       );
-      if (resetCpErr) console.error("reset_customer_checkpoint upsert failed:", resetCpErr.message);
+      if (resetCpErr) devError("reset_customer_checkpoint upsert failed:", resetCpErr.message);
     }
 
     let hasNextPage = true;
@@ -351,7 +361,7 @@ Deno.serve(async (req) => {
       }`));
       } catch (err) {
         if (cursor && isInvalidCursorError(err)) {
-          console.warn("Invalid Shopify cursor for customers; resetting checkpoint cursor and retrying from latest.");
+          devWarn("Invalid Shopify cursor for customers; resetting checkpoint cursor and retrying from latest.");
           cursor = null;
           await saveCheckpointCursor("customers", null, false);
           customerPages--;
@@ -596,7 +606,7 @@ Deno.serve(async (req) => {
       }`));
       } catch (err) {
         if (cursor && isInvalidCursorError(err)) {
-          console.warn("Invalid Shopify cursor for orders; resetting checkpoint cursor and retrying from latest.");
+          devWarn("Invalid Shopify cursor for orders; resetting checkpoint cursor and retrying from latest.");
           cursor = null;
           await saveCheckpointCursor("orders", null, false);
           orderPages--;
@@ -863,7 +873,7 @@ Deno.serve(async (req) => {
       }`));
       } catch (err) {
         if (cursor && isInvalidCursorError(err)) {
-          console.warn("Invalid Shopify cursor for products; resetting checkpoint cursor and retrying from latest.");
+          devWarn("Invalid Shopify cursor for products; resetting checkpoint cursor and retrying from latest.");
           cursor = null;
           await saveCheckpointCursor("products", null, false);
           productPages--;
@@ -1026,7 +1036,7 @@ Deno.serve(async (req) => {
       }`));
       } catch (err) {
         if (cursor && isInvalidCursorError(err)) {
-          console.warn("Invalid Shopify cursor for collections; resetting checkpoint cursor and retrying from latest.");
+          devWarn("Invalid Shopify cursor for collections; resetting checkpoint cursor and retrying from latest.");
           cursor = null;
           await saveCheckpointCursor("collections", null, false);
           collPages--;
@@ -1265,7 +1275,7 @@ Deno.serve(async (req) => {
   );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Internal server error";
-    console.error("shopify-sync error:", err);
+    devError("shopify-sync error:", err);
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

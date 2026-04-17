@@ -9,6 +9,12 @@ import {
 } from "../_shared/shopify-credentials.ts";
 import { resolveShopifyAuth } from "../_shared/shopify-auth.ts";
 
+const isDev = (Deno.env.get("ENV") || Deno.env.get("DENO_ENV") || "").toLowerCase() === "development";
+const devError = (...args: unknown[]) => {
+  if (!isDev) return;
+  console.error(...args);
+};
+
 Deno.serve(async (req) => {
   try {
     if (req.method === "OPTIONS") {
@@ -119,7 +125,7 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("shopify-test error:", err);
+    devError("shopify-test error:", err);
     return new Response(JSON.stringify({ error: `Connection test failed: ${msg}` }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import {
-  useCustomerIdsForSalespeople,
   useManagerTeamMemberOptions,
   useOrderItems,
   useOrdersPaginated,
@@ -171,10 +170,7 @@ export default function OrdersPage() {
     }
     return false;
   }, [isLeader, isSupervisor, isManager, scopeMode]);
-  const shouldLoadScopedCustomerIds = shouldApplyExplicitScopeFilters && scopedSalespersonIds.length === 0;
-  const { data: scopedCustomerIdsResolved = [], isLoading: isScopeCustomersLoading2, isFetching: isScopeCustomersFetching2 } =
-    useCustomerIdsForSalespeople(scopedSalespersonIds, "orders-page", shouldLoadScopedCustomerIds);
-  const isScopeCustomersReady = !shouldLoadScopedCustomerIds || (!isScopeCustomersLoading2 && !isScopeCustomersFetching2);
+  const isScopeCustomersReady = true;
 
   useEffect(() => {
     const saved = loadUserFilterPreset(user?.id, "orders-page", {
@@ -237,7 +233,6 @@ export default function OrdersPage() {
     sortBy,
     sortDir,
     scopeSalespersonIds: shouldApplyExplicitScopeFilters ? scopedSalespersonIds : undefined,
-    scopeCustomerIds: shouldApplyExplicitScopeFilters ? scopedCustomerIdsResolved : undefined,
     scopeOwnerNames: shouldApplyExplicitScopeFilters ? scopedOwnerNames : undefined,
     forceScopedFilter: shouldApplyExplicitScopeFilters,
     enabled: isScopeCustomersReady,

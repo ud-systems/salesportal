@@ -18,6 +18,11 @@ import {
 } from "../_shared/salesperson-match.ts";
 
 type SalespersonRow = { user_id: string; salesperson_name: string | null };
+const isDev = (Deno.env.get("ENV") || Deno.env.get("DENO_ENV") || "").toLowerCase() === "development";
+const devError = (...args: unknown[]) => {
+  if (!isDev) return;
+  console.error(...args);
+};
 
 async function addLeaderRecipientsFromSalespeople(
   supabase: ReturnType<typeof createClient>,
@@ -37,7 +42,7 @@ async function addLeaderRecipientsFromSalespeople(
       .in("member_user_id", frontier)
       .in("leader_role", ["manager", "supervisor"]);
     if (error) {
-      console.error("sales_hierarchy_edges recipients lookup:", error.message);
+      devError("sales_hierarchy_edges recipients lookup:", error.message);
       return;
     }
     const nextFrontier: string[] = [];
@@ -591,7 +596,7 @@ Deno.serve(async (req) => {
           },
         });
         const code = (error as { code?: string } | null)?.code;
-        if (error && code !== "23505") console.error("user_notifications order:", error.message);
+        if (error && code !== "23505") devError("user_notifications order:", error.message);
       }
     };
 
@@ -632,7 +637,7 @@ Deno.serve(async (req) => {
           payload: { name: c.name, email: c.email },
         });
         const code = (error as { code?: string } | null)?.code;
-        if (error && code !== "23505") console.error("user_notifications customer:", error.message);
+        if (error && code !== "23505") devError("user_notifications customer:", error.message);
       }
     };
 
@@ -672,7 +677,7 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Internal error";
-    console.error("shopify-webhook error:", err);
+    devError("shopify-webhook error:", err);
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

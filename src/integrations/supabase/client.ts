@@ -44,3 +44,12 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
   }
 });
+
+void supabase.auth.getSession().then(async ({ data }) => {
+  if (!data.session) return;
+  const { error } = await supabase.auth.refreshSession();
+  if (!error) return;
+  if (/Invalid Refresh Token|Refresh Token Not Found/i.test(error.message || "")) {
+    await supabase.auth.signOut({ scope: "local" });
+  }
+});

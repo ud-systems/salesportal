@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";
+import { devError } from "@/lib/dev-logger";
 import { useQuery } from "@tanstack/react-query";
 
 export type SalespersonPerformanceRow = {
@@ -106,7 +107,7 @@ export function useScopeOrderMetrics(
       });
       if (error) {
         // Keep dashboards usable even if backend RPC temporarily fails.
-        console.error("get_scope_order_metrics failed", error);
+        devError("get_scope_order_metrics failed", error);
         return { orders_count: 0, customers_count: 0, revenue: 0, avg_order_value: 0 } satisfies ScopeOrderMetrics;
       }
       const row = (data?.[0] ?? {}) as Partial<ScopeOrderMetrics>;
@@ -600,6 +601,7 @@ type CustomerQueryParams = {
   toDate?: string;
   sortBy?: "total_revenue" | "total_orders" | "shopify_created_at" | "name";
   sortDir?: "asc" | "desc";
+  scopeSalespersonIds?: string[];
   scopeCustomerIds?: string[];
   scopeOwnerNames?: string[];
   forceScopedFilter?: boolean;
@@ -642,11 +644,13 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
     toDate,
     sortBy = "total_revenue",
     sortDir = "desc",
+    scopeSalespersonIds = [],
     scopeCustomerIds = [],
     scopeOwnerNames = [],
     forceScopedFilter = false,
     enabled = true,
   } = params;
+  const salespersonScopeKey = [...scopeSalespersonIds].sort().join(",");
   const scopeKey = [...scopeCustomerIds].sort().join(",");
   const ownerScopeKey = [...scopeOwnerNames].map((name) => name.trim()).filter(Boolean).sort().join(",");
   return useQuery({
@@ -661,15 +665,46 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       toDate,
       sortBy,
       sortDir,
+      salespersonScopeKey,
       scopeKey,
       ownerScopeKey,
     ],
     queryFn: async () => {
       const scopedCustomerIdsFinal = Array.from(new Set(scopeCustomerIds.filter(Boolean)));
+      const scopedSalespeopleFinal = Array.from(new Set(scopeSalespersonIds.filter(Boolean)));
+      const scopedOwnerNamesFinal = Array.from(new Set(scopeOwnerNames.map((name) => name.trim()).filter(Boolean)));
       const requestedScopedFilter =
-        forceScopedFilter || (params.scopeCustomerIds?.length ?? 0) > 0 || (params.scopeOwnerNames?.length ?? 0) > 0;
+        forceScopedFilter ||
+        (params.scopeSalespersonIds?.length ?? 0) > 0 ||
+        (params.scopeCustomerIds?.length ?? 0) > 0 ||
+        (params.scopeOwnerNames?.length ?? 0) > 0;
       if (requestedScopedFilter && scopedCustomerIdsFinal.length === 0) {
-        return { data: [], count: 0 };
+        if (scopedSalespeopleFinal.length === 0 && scopedOwnerNamesFinal.length === 0) {
+          return { data: [], count: 0 };
+        }
+        const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
+        if (!viewerUserId) return { data: [], count: 0 };
+        const { data: scopedRows, error: scopedError } = await (supabase as any).rpc("get_scoped_customers_page", {
+          _viewer_user_id: viewerUserId,
+          _salesperson_user_ids: scopedSalespeopleFinal,
+          _owner_names: scopedOwnerNamesFinal,
+          _search: search || null,
+          _city_filter: cityFilter,
+          _assignment_filter: assignmentFilter,
+          _from_iso: fromDate ? `${fromDate}T00:00:00.000Z` : null,
+          _to_iso: toDate ? `${toDate}T23:59:59.999Z` : null,
+          _sort_by: sortBy,
+          _sort_dir: sortDir,
+          _page: page,
+          _page_size: pageSize,
+          _force_scoped_filter: true,
+        });
+        if (scopedError) throw scopedError;
+        const rows = (scopedRows ?? []) as { row_data: any; total_count: number | null }[];
+        return {
+          data: rows.map((r) => r.row_data).filter(Boolean),
+          count: Number(rows[0]?.total_count ?? 0),
+        };
       }
       let query = supabase
         .from("shopify_customers")
@@ -759,7 +794,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
       if (error) {
-        console.error("useCustomersPaginated failed", {
+        devError("useCustomersPaginated failed", {
           message: error.message,
           details: (error as { details?: string }).details,
           hint: (error as { hint?: string }).hint,
@@ -1122,7 +1157,7 @@ export function useScopeOrderTimeseries(
         _bucket: bucket,
       });
       if (error) {
-        console.error("useScopeOrderTimeseries failed", {
+        devError("useScopeOrderTimeseries failed", {
           message: error.message,
           details: (error as { details?: string }).details,
           hint: (error as { hint?: string }).hint,
@@ -1247,6 +1282,33 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
         (params.scopeSalespersonIds?.length ?? 0) > 0 ||
         (params.scopeCustomerIds?.length ?? 0) > 0 ||
         (params.scopeOwnerNames?.length ?? 0) > 0;
+      if (requestedScopedFilter) {
+        const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
+        if (!viewerUserId) return { data: [], count: 0 };
+        const scopedSalespeopleFinal = Array.from(new Set(scopeSalespersonIds.filter(Boolean)));
+        const scopedOwnerNamesFinal = Array.from(new Set(scopeOwnerNames.map((name) => name.trim()).filter(Boolean)));
+        const { data: scopedRows, error: scopedError } = await (supabase as any).rpc("get_scoped_orders_page", {
+          _viewer_user_id: viewerUserId,
+          _salesperson_user_ids: scopedSalespeopleFinal,
+          _owner_names: scopedOwnerNamesFinal,
+          _search: search || null,
+          _status_filter: statusFilter,
+          _fulfillment_filter: fulfillmentFilter,
+          _from_iso: fromDate ? `${fromDate}T00:00:00.000Z` : null,
+          _to_iso: toDate ? `${toDate}T23:59:59.999Z` : null,
+          _sort_by: sortBy,
+          _sort_dir: sortDir,
+          _page: page,
+          _page_size: pageSize,
+          _force_scoped_filter: true,
+        });
+        if (scopedError) throw scopedError;
+        const rows = (scopedRows ?? []) as { row_data: any; total_count: number | null }[];
+        return {
+          data: rows.map((r) => r.row_data).filter(Boolean),
+          count: Number(rows[0]?.total_count ?? 0),
+        };
+      }
       const scopedCustomerIdsFinal = Array.from(new Set(scopeCustomerIds.filter(Boolean)));
       if (scopeSalespersonIds.length > 0) {
         const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
@@ -1428,7 +1490,7 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
       if (error) {
-        console.error("useOrdersPaginated failed", {
+        devError("useOrdersPaginated failed", {
           message: error.message,
           details: (error as { details?: string }).details,
           hint: (error as { hint?: string }).hint,
