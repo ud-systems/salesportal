@@ -355,8 +355,8 @@ export default function AdminDashboardPage() {
           {loadingBar ? (
             <Skeleton className="h-[220px] w-full rounded-xl" />
           ) : (
-            <div className="flex-1 min-h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="flex-1 min-h-[220px] min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <BarChart
                   data={barChartData}
                   margin={{ top: 6, right: 0, left: 0, bottom: 0 }}

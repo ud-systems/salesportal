@@ -4,13 +4,36 @@ import type { Database } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const STORAGE_KEY = `sb-${new URL(SUPABASE_URL).hostname.split(".")[0]}-auth-token`;
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
+function clearInvalidStoredSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as {
+      currentSession?: { refresh_token?: string | null };
+      expiresAt?: number | null;
+    };
+    const refreshToken = parsed?.currentSession?.refresh_token;
+    // Stale auth blobs without refresh token trigger repeated refresh failures.
+    if (!refreshToken) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    // Corrupted auth payload can also break refresh bootstrap.
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+clearInvalidStoredSession();
+
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     storage: localStorage,
+    storageKey: STORAGE_KEY,
     persistSession: true,
     autoRefreshToken: true,
   }

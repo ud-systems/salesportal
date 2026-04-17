@@ -30,7 +30,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ChartNoAxesCombined } from "lucide-react";
 
 const PREVIEW_ROW_CAP = 200;
-const MONEY_COLUMN_HINTS = /(revenue|total|subtotal|tax|price|amount|value|avg|average)/i;
+const MONEY_COLUMN_HINTS = /(revenue|total|subtotal|tax|price|amount|avg|average|aov|order value)/i;
 const PDF_BRAND_PRIMARY_RGB: [number, number, number] = [93, 163, 67];
 const PDF_BRAND_SECONDARY_RGB: [number, number, number] = [108, 191, 64];
 
@@ -68,8 +68,24 @@ function getDisplayCurrencyLabel(currencyCode: string): string {
   return code;
 }
 
-function formatReportCell(columnName: string, cell: string | number, currencyCode: string): string {
-  if (!MONEY_COLUMN_HINTS.test(columnName)) return String(cell);
+function isMonetaryMetricLabel(metricLabel: string): boolean {
+  return /(revenue|tax|subtotal|total|avg|average|aov|order value)/i.test(metricLabel);
+}
+
+function formatReportCell(
+  columnName: string,
+  cell: string | number,
+  currencyCode: string,
+  row?: (string | number)[],
+  columnIndex?: number,
+): string {
+  // Sales summary uses a generic "Value" column for mixed units (counts + currency).
+  if (columnName.toLowerCase() === "value" && typeof columnIndex === "number" && columnIndex === 1 && row?.length) {
+    const metricLabel = String(row[0] ?? "");
+    if (!isMonetaryMetricLabel(metricLabel)) return String(cell);
+  } else if (!MONEY_COLUMN_HINTS.test(columnName)) {
+    return String(cell);
+  }
   const n = typeof cell === "number" ? cell : Number(cell);
   if (!Number.isFinite(n)) return String(cell);
   return formatOrderMoney(n, null, currencyCode);
@@ -364,7 +380,7 @@ export default function AnalyticsPage() {
       );
       doc.setTextColor(0);
 
-      const body = rows.map((r) => r.map((c, index) => formatReportCell(columns[index], c, currency)));
+      const body = rows.map((r) => r.map((c, index) => formatReportCell(columns[index], c, currency, r, index)));
       autoTable(doc, {
         startY: 58,
         head: [columns],
@@ -754,9 +770,9 @@ export default function AnalyticsPage() {
                                 <TableCell
                                   key={j}
                                   className="font-body text-xs max-w-[200px] truncate"
-                                  title={formatReportCell(preview.columns[j], cell, currency)}
+                                  title={formatReportCell(preview.columns[j], cell, currency, row, j)}
                                 >
-                                  {formatReportCell(preview.columns[j], cell, currency)}
+                                  {formatReportCell(preview.columns[j], cell, currency, row, j)}
                                 </TableCell>
                               ))}
                             </TableRow>

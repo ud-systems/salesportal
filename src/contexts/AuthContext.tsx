@@ -104,6 +104,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setLoading(false);
     };
+    const handleInvalidRefreshToken = async (message: string) => {
+      if (!/Invalid Refresh Token|Refresh Token Not Found/i.test(message)) return;
+      // Clear only local auth state, avoid noisy retry loops with stale tokens.
+      await supabase.auth.signOut({ scope: "local" });
+      setUser(null);
+      setLoading(false);
+    };
 
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -111,9 +118,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     // Then check existing session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      await applySession(session as { user: User } | null);
-    });
+    supabase.auth.getSession()
+      .then(async ({ data: { session }, error }) => {
+        if (error) {
+          await handleInvalidRefreshToken(error.message);
+          return;
+        }
+        await applySession(session as { user: User } | null);
+      })
+      .catch(async (err) => {
+        await handleInvalidRefreshToken(err instanceof Error ? err.message : String(err));
+      });
 
     return () => subscription.unsubscribe();
   }, []);
