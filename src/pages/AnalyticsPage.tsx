@@ -520,7 +520,7 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full">
-                  <ResponsiveContainer key={`revenue-${chartRenderKey}`} width="100%" height="100%" minWidth={0} minHeight={220}>
+                  <ResponsiveContainer key={`revenue-${chartRenderKey}`} width="100%" height={220} minWidth={0} minHeight={220}>
                     <ComposedChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis
@@ -579,7 +579,7 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full">
-                  <ResponsiveContainer key={`orders-${chartRenderKey}`} width="100%" height="100%" minWidth={0} minHeight={220}>
+                  <ResponsiveContainer key={`orders-${chartRenderKey}`} width="100%" height={220} minWidth={0} minHeight={220}>
                     <AreaChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="analyticsOrdersGradient" x1="0" y1="0" x2="0" y2="1">

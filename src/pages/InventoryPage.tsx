@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 
 export default function InventoryPage() {
   const [search, setSearch] = useState("");
@@ -21,10 +22,11 @@ export default function InventoryPage() {
   const pageSize = isMobile ? 10 : 15;
   const { data: locationsData } = useInventoryLocations();
   const locations = locationsData?.filter(Boolean) ?? ["all"];
-  const { data, isLoading } = useVariantsPaginated({ page, pageSize, search, locationFilter, fromDate, toDate, sortBy, sortDir });
+  const { data, isLoading, isFetching } = useVariantsPaginated({ page, pageSize, search, locationFilter, fromDate, toDate, sortBy, sortDir });
   const variants = data?.data ?? [];
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const isRefreshing = isFetching && !isLoading;
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -159,7 +161,7 @@ export default function InventoryPage() {
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No inventory data. Run a Shopify sync first.</p></div>
       ) : (
         <>
-          <div className="space-y-3">
+          <div className="relative space-y-3">
             {Object.entries(grouped).map(([key, group], i) => (
               <div key={key} className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 60}ms` }}>
                 <div className="flex items-start justify-between mb-3">
@@ -186,6 +188,7 @@ export default function InventoryPage() {
                 </div>
               </div>
             ))}
+            {isRefreshing && <RecordsLoadingOverlay rows={4} className="rounded-xl" />}
           </div>
           <div className="card-float p-3">
             <div className="flex items-center justify-between text-xs text-muted-foreground font-body px-2">

@@ -3,11 +3,10 @@ import { KpiCard } from "@/components/KpiCard";
 import {
   useRecentOrders,
   useRecentOrdersInRange,
-  useRevenueByMonthForYear,
-  useOrdersTimeseriesInRange,
   useUnfulfilledOrdersCount,
   useSalespersonPerformance,
   useScopeOrderMetrics,
+  useScopeOrderTimeseries,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useMemo, useEffect, useState } from "react";
@@ -38,7 +37,6 @@ export default function AdminDashboardPage() {
   const LICENSE_BANNER_DISMISS_UNTIL_KEY = "datapulse_license_banner_dismiss_until_ms";
   const ONE_HOUR_MS = 60 * 60 * 1000;
   const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-  const year = new Date().getUTCFullYear();
   const { data: currency = "GBP" } = useShopDisplayCurrency();
   const [preset, setPreset] = useState<DatePreset>("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -70,12 +68,13 @@ export default function AdminDashboardPage() {
     cmpToIso,
     !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
   );
-  const { data: seriesRange = [], isLoading: loadingSeries } = useOrdersTimeseriesInRange(
-    fromIso,
-    toIso,
-    bucket,
+  const { data: series = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
+    user?.id,
+    isAll ? null : fromIso,
+    isAll ? null : toIso,
+    isAll ? "month" : bucket,
     "admin",
-    !isAll,
+    Boolean(user?.id),
   );
   const { data: unfulfilledOrders = 0, isLoading: loadingUnfulfilled } = useUnfulfilledOrdersCount();
   const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(10);
@@ -86,7 +85,6 @@ export default function AdminDashboardPage() {
     "admin",
     !isAll,
   );
-  const { data: revenueData = [], isLoading: loadingRevenue } = useRevenueByMonthForYear(year);
   const totalRevenue = isAll ? (allMetrics?.revenue ?? 0) : (rangeMetrics?.revenue ?? 0);
   const totalOrders = isAll ? (allMetrics?.orders_count ?? 0) : (rangeMetrics?.orders_count ?? 0);
   const totalCustomers = isAll ? (allMetrics?.customers_count ?? 0) : (rangeMetrics?.customers_count ?? 0);
@@ -98,11 +96,11 @@ export default function AdminDashboardPage() {
   const prevRevenue = compareMetrics?.revenue ?? 0;
   const revDelta =
     !isAll && prevRevenue > 0 ? (((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
-  const barChartData = useMemo(() => {
-    if (isAll) return revenueData;
-    return seriesRange.map((p) => ({ month: p.label, revenue: p.revenue, orders: p.orders, year }));
-  }, [isAll, revenueData, seriesRange, year]);
-  const loadingBar = isAll ? loadingRevenue : loadingSeries;
+  const barChartData = useMemo(
+    () => series.map((p) => ({ month: p.label, revenue: p.revenue, orders: p.orders })),
+    [series],
+  );
+  const loadingBar = loadingSeries;
 
   const [licenseCode, setLicenseCode] = useState("");
   const [licenseExpiresAt, setLicenseExpiresAt] = useState("");
@@ -350,13 +348,13 @@ export default function AdminDashboardPage() {
       <div className={`grid grid-cols-1 items-stretch gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
         <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <h3 className="font-heading font-semibold text-foreground mb-4">
-            {isAll ? `Revenue by Month (${revenueData[0]?.year || year})` : "Revenue (selected period)"}
+            {isAll ? "Revenue by Month" : "Revenue (selected period)"}
           </h3>
           {loadingBar ? (
             <Skeleton className="h-[220px] w-full rounded-xl" />
           ) : (
             <div className="flex-1 min-h-[220px] min-w-0">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+              <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
                 <BarChart
                   data={barChartData}
                   margin={{ top: 6, right: 0, left: 0, bottom: 0 }}

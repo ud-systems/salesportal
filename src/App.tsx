@@ -56,8 +56,8 @@ const App = () => (
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/products" element={<ProductsPage />} />
-              <Route path="/collections" element={<CollectionsPage />} />
-              <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+              <Route path="/collections" element={<ProtectedRoute requiredCapabilities={["view_procurement_pages"]}><CollectionsPage /></ProtectedRoute>} />
+              <Route path="/purchase-orders" element={<ProtectedRoute requiredCapabilities={["view_procurement_pages"]}><PurchaseOrdersPage /></ProtectedRoute>} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/salespersons" element={<ProtectedRoute requiredCapabilities={["view_salespersons_page"]}><SalespersonsPage /></ProtectedRoute>} />
               <Route path="/sync-logs" element={<ProtectedRoute requiredCapabilities={["view_sync_logs"]}><SyncLogsPage /></ProtectedRoute>} />

@@ -56,11 +56,12 @@ async function fetchUserRole(userId: string): Promise<{ role: UserRole; roles: U
   if (error || !data) return null;
   const roles = Array.from(new Set(data.map((row) => row.role)));
   if (!roles.length) return null;
-  const salespersonRow = data.find((row) => row.role === "salesperson");
+  const salespersonRow = data.find((row) => row.role === "salesperson" && (row.salesperson_name || "").trim().length > 0);
+  const fallbackNamedRow = data.find((row) => (row.salesperson_name || "").trim().length > 0);
   return {
     role: pickPrimaryRole(roles),
     roles,
-    salesperson_name: salespersonRow?.salesperson_name || undefined,
+    salesperson_name: salespersonRow?.salesperson_name || fallbackNamedRow?.salesperson_name || undefined,
   };
 }
 

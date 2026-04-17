@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { formatDisplayDate, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
@@ -22,10 +23,11 @@ export default function PurchaseOrdersPage() {
   const [sortBy, setSortBy] = useState<"po_date" | "expected_date" | "total_amount" | "supplier_name">("po_date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
-  const { data, isLoading } = usePurchaseOrdersPaginated({ page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir });
+  const { data, isLoading, isFetching } = usePurchaseOrdersPaginated({ page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir });
   const rows = data?.data ?? [];
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const isRefreshing = isFetching && !isLoading;
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -144,7 +146,7 @@ export default function PurchaseOrdersPage() {
       ) : rows.length === 0 ? (
         <div className="card-float p-10 text-center"><p className="text-muted-foreground font-body">No purchase orders found. Sync to import tagged purchase-order records.</p></div>
       ) : (
-        <div className="card-float p-5 overflow-x-auto">
+        <div className="relative card-float p-5 overflow-x-auto">
           <table className="w-full text-sm font-body">
             <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5">PO #</th><th className="text-left py-2.5">Supplier</th><th className="text-left py-2.5">Status</th><th className="text-right py-2.5">Amount</th><th className="text-left py-2.5">PO Date</th><th className="text-left py-2.5">Expected</th></tr></thead>
             <tbody>
@@ -162,6 +164,7 @@ export default function PurchaseOrdersPage() {
               ))}
             </tbody>
           </table>
+          {isRefreshing && <RecordsLoadingOverlay rows={5} />}
         </div>
       )}
       {totalCount > 0 && (

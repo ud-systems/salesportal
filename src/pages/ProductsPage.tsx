@@ -8,6 +8,7 @@ import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/comp
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -29,10 +30,11 @@ export default function ProductsPage() {
   const pageSize = isMobile ? 10 : 15;
   const { data: statusesData } = useProductStatuses();
   const statuses = statusesData ?? ["all"];
-  const { data, isLoading } = useProductsPaginated({ page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir });
+  const { data, isLoading, isFetching } = useProductsPaginated({ page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir });
   const products = data?.data ?? [];
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const isRefreshing = isFetching && !isLoading;
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -187,7 +189,7 @@ export default function ProductsPage() {
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No products yet. Run a Shopify sync first.</p></div>
       ) : (
         <>
-        <div className="grid grid-cols-1 gap-4 lg:hidden">
+        <div className="relative grid grid-cols-1 gap-4 lg:hidden">
           {filtered.map((product: any, i: number) => (
             <div key={product.id} onClick={() => setSelectedProduct(product)} className="card-float p-5 opacity-0 animate-fade-in cursor-pointer" style={{ animationDelay: `${50 + i * 80}ms` }}>
               <div className="flex items-start gap-3 mb-4">
@@ -225,8 +227,9 @@ export default function ProductsPage() {
               </div>
             </div>
           ))}
+          {isRefreshing && <RecordsLoadingOverlay rows={4} className="rounded-xl" />}
         </div>
-        <div className="hidden lg:block card-float p-0 overflow-hidden opacity-0 animate-fade-in" style={{ animationDelay: "80ms" }}>
+        <div className="relative hidden lg:block card-float p-0 overflow-hidden opacity-0 animate-fade-in" style={{ animationDelay: "80ms" }}>
           <Table>
             <TableHeader>
               <TableRow>
@@ -325,6 +328,7 @@ export default function ProductsPage() {
               })}
             </TableBody>
           </Table>
+          {isRefreshing && <RecordsLoadingOverlay rows={6} className="rounded-none" />}
         </div>
         </>
       )}

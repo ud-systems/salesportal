@@ -69,8 +69,11 @@ export function BottomSheet({ open, onClose, title, children, footer }: BottomSh
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b">
           <h3 className="font-heading font-semibold text-foreground text-lg">{title}</h3>
-          <button onClick={onClose} className="tap-scale p-1.5 rounded-xl hover:bg-muted">
-            <X className="h-5 w-5 text-muted-foreground" />
+          <button
+            onClick={onClose}
+            className="tap-scale inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground transition-colors hover:bg-muted/80"
+          >
+            <X className="h-4 w-4" />
           </button>
         </div>
 

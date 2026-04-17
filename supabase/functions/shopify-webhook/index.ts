@@ -19,6 +19,38 @@ import {
 
 type SalespersonRow = { user_id: string; salesperson_name: string | null };
 
+async function addLeaderRecipientsFromSalespeople(
+  supabase: ReturnType<typeof createClient>,
+  salespersonIds: string[],
+  recipientUserIds: Set<string>,
+) {
+  if (!salespersonIds.length) return;
+
+  // Collect upward hierarchy (manager/supervisor) from assigned salespeople.
+  // We walk two levels which covers salesperson -> manager -> supervisor and
+  // also supports direct salesperson -> supervisor edges.
+  let frontier = Array.from(new Set(salespersonIds));
+  for (let depth = 0; depth < 2 && frontier.length > 0; depth++) {
+    const { data: edges, error } = await supabase
+      .from("sales_hierarchy_edges")
+      .select("leader_user_id, member_user_id, leader_role")
+      .in("member_user_id", frontier)
+      .in("leader_role", ["manager", "supervisor"]);
+    if (error) {
+      console.error("sales_hierarchy_edges recipients lookup:", error.message);
+      return;
+    }
+    const nextFrontier: string[] = [];
+    for (const edge of edges || []) {
+      const leaderId = (edge as { leader_user_id?: string | null }).leader_user_id;
+      if (!leaderId) continue;
+      recipientUserIds.add(leaderId);
+      nextFrontier.push(leaderId);
+    }
+    frontier = Array.from(new Set(nextFrontier));
+  }
+}
+
 function b64FromBytes(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
@@ -526,6 +558,7 @@ Deno.serve(async (req) => {
         const id = (r as { user_id: string }).user_id;
         if (id) userIds.add(id);
       }
+      const assignedSalespersonIds = new Set<string>();
       if (o.customer_id) {
         const { data: assigns } = await supabase
           .from("salesperson_customer_assignments")
@@ -533,9 +566,12 @@ Deno.serve(async (req) => {
           .eq("customer_id", o.customer_id);
         for (const a of assigns || []) {
           const id = (a as { salesperson_user_id: string }).salesperson_user_id;
-          if (id) userIds.add(id);
+          if (!id) continue;
+          userIds.add(id);
+          assignedSalespersonIds.add(id);
         }
       }
+      await addLeaderRecipientsFromSalespeople(supabase, Array.from(assignedSalespersonIds), userIds);
       const orderLabel = String(o.order_number || internalOrderId);
       const amt = Number(o.total || 0);
       const cur = o.currency_code || "";
@@ -576,10 +612,14 @@ Deno.serve(async (req) => {
         .from("salesperson_customer_assignments")
         .select("salesperson_user_id")
         .eq("customer_id", internalCustomerId);
+      const assignedSalespersonIds = new Set<string>();
       for (const a of assigns || []) {
         const id = (a as { salesperson_user_id: string }).salesperson_user_id;
-        if (id) userIds.add(id);
+        if (!id) continue;
+        userIds.add(id);
+        assignedSalespersonIds.add(id);
       }
+      await addLeaderRecipientsFromSalespeople(supabase, Array.from(assignedSalespersonIds), userIds);
       const body = `${c.name}${c.email ? ` · ${c.email}` : ""}`.trim();
       for (const user_id of userIds) {
         const { error } = await supabase.from("user_notifications").insert({

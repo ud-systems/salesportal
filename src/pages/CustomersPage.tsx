@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { useCustomerCities, useCustomersPaginated } from "@/hooks/use-shopify-data";
+import {
+  useCustomerCities,
+  useCustomerIdsForSalespeople,
+  useCustomersPaginated,
+  useSalespeopleUnderManagers,
+  useSupervisorManagerOptions,
+  useSupervisorSalespersonOptions,
+} from "@/hooks/use-shopify-data";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -12,6 +19,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -20,7 +28,7 @@ import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-
 
 export default function CustomersPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isSupervisor } = useAuth();
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [assignmentFilter, setAssignmentFilter] = useState("all");
@@ -33,12 +41,92 @@ export default function CustomersPage() {
   const [toDate, setToDate] = useState("");
   const [preset, setPreset] = useState<DatePreset>("all");
   const [quickRankFilter, setQuickRankFilter] = useState<"all" | "top3" | "bottom3">("all");
+  const [scopeMode, setScopeMode] = useState<"mine" | "manager_team">("mine");
+  const [selectedManagerId, setSelectedManagerId] = useState("all");
+  const [selectedSalespersonId, setSelectedSalespersonId] = useState("all");
   const [sortBy, setSortBy] = useState<"total_revenue" | "total_orders" | "shopify_created_at" | "name">("total_revenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
   const fromIso = toRangeIso(range.from);
   const toIso = toRangeIso(range.to);
+  const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, "customers-page");
+  const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, "customers-page");
+  const { data: managerSalespeople = [] } = useSalespeopleUnderManagers(
+    selectedManagerId !== "all" ? [selectedManagerId] : [],
+    "customers-page",
+    isSupervisor && scopeMode === "manager_team" && selectedManagerId !== "all",
+  );
+  const allManagerIds = useMemo(() => managerOptions.map((m) => m.user_id), [managerOptions]);
+  const { data: allManagedSalespeople = [] } = useSalespeopleUnderManagers(
+    allManagerIds,
+    "customers-page-all-managers",
+    isSupervisor && scopeMode === "manager_team" && selectedManagerId === "all",
+  );
+  const filteredSalespersonOptions = useMemo(
+    () =>
+      selectedManagerId === "all"
+        ? salespersonOptions
+        : salespersonOptions.filter((sp) => managerSalespeople.includes(sp.user_id)),
+    [selectedManagerId, salespersonOptions, managerSalespeople],
+  );
+  const managerLabelById = useMemo(
+    () => new Map(managerOptions.map((m) => [m.user_id, m.label] as const)),
+    [managerOptions],
+  );
+  const scopedSalespersonIds = useMemo(() => {
+    if (!isSupervisor) return [] as string[];
+    if (scopeMode === "mine") return user?.id ? [user.id] : [];
+    if (scopeMode === "manager_team" && selectedSalespersonId !== "all") return [selectedSalespersonId];
+    if (scopeMode === "manager_team" && selectedManagerId !== "all") {
+      return Array.from(new Set([selectedManagerId, ...managerSalespeople]));
+    }
+    if (scopeMode === "manager_team") {
+      return Array.from(new Set([...allManagerIds, ...allManagedSalespeople]));
+    }
+    return [];
+  }, [
+    isSupervisor,
+    scopeMode,
+    managerSalespeople,
+    allManagedSalespeople,
+    allManagerIds,
+    selectedManagerId,
+    selectedSalespersonId,
+    user?.id,
+  ]);
+  const scopedOwnerNames = useMemo(() => {
+    if (!isSupervisor) return [] as string[];
+    if (scopeMode === "mine") return user?.salesperson_name ? [user.salesperson_name] : [];
+    if (scopeMode === "manager_team" && selectedManagerId !== "all") {
+      const managerLabel = managerLabelById.get(selectedManagerId);
+      if (selectedSalespersonId !== "all") {
+        const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+        return Array.from(new Set([selected?.label, managerLabel].filter(Boolean) as string[]));
+      }
+      return Array.from(new Set([managerLabel, ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean) as string[]));
+    }
+    if (selectedSalespersonId !== "all") {
+      const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+      return selected?.label ? [selected.label] : [];
+    }
+    return Array.from(new Set([...managerOptions.map((m) => m.label), ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean)));
+  }, [isSupervisor, scopeMode, user?.salesperson_name, selectedSalespersonId, selectedManagerId, filteredSalespersonOptions, managerLabelById, managerOptions]);
+  const shouldApplyExplicitScopeFilters = useMemo(() => {
+    if (!isSupervisor) return false;
+    if (scopeMode === "mine") return true;
+    if (scopeMode === "manager_team") {
+      return selectedManagerId !== "all" || selectedSalespersonId !== "all";
+    }
+    return false;
+  }, [isSupervisor, scopeMode, selectedManagerId, selectedSalespersonId]);
+  const shouldLoadScopedCustomerIds = shouldApplyExplicitScopeFilters && scopedSalespersonIds.length > 0;
+  const {
+    data: scopedCustomerIds = [],
+    isLoading: isScopeCustomersLoading,
+    isFetching: isScopeCustomersFetching,
+  } = useCustomerIdsForSalespeople(scopedSalespersonIds, "customers-page", shouldLoadScopedCustomerIds);
+  const isScopeCustomersReady = !shouldLoadScopedCustomerIds || (!isScopeCustomersLoading && !isScopeCustomersFetching);
 
   useEffect(() => {
     const saved = loadUserFilterPreset(user?.id, "customers-page", {
@@ -51,6 +139,9 @@ export default function CustomersPage() {
       sortBy: "total_revenue" as "total_revenue" | "total_orders" | "shopify_created_at" | "name",
       sortDir: "desc" as "asc" | "desc",
       quickRankFilter: "all" as "all" | "top3" | "bottom3",
+      scopeMode: "mine" as "mine" | "manager_team",
+      selectedManagerId: "all",
+      selectedSalespersonId: "all",
     });
     setSearch(saved.search);
     setCityFilter(saved.cityFilter);
@@ -61,6 +152,9 @@ export default function CustomersPage() {
     setSortBy(saved.sortBy);
     setSortDir(saved.sortDir);
     setQuickRankFilter(saved.quickRankFilter);
+    setScopeMode(saved.scopeMode === "manager_team" ? "manager_team" : "mine");
+    setSelectedManagerId(saved.selectedManagerId);
+    setSelectedSalespersonId(saved.selectedSalespersonId);
   }, [user?.id]);
 
   useEffect(() => {
@@ -74,8 +168,11 @@ export default function CustomersPage() {
       sortBy,
       sortDir,
       quickRankFilter,
+      scopeMode,
+      selectedManagerId,
+      selectedSalespersonId,
     });
-  }, [user?.id, search, cityFilter, assignmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter]);
+  }, [user?.id, search, cityFilter, assignmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter, scopeMode, selectedManagerId, selectedSalespersonId]);
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -86,7 +183,7 @@ export default function CustomersPage() {
 
   const { data: cityData } = useCustomerCities();
   const cities = cityData ?? ["all"];
-  const { data, isLoading } = useCustomersPaginated({
+  const { data, isLoading, isFetching } = useCustomersPaginated({
     page,
     pageSize,
     search,
@@ -96,8 +193,14 @@ export default function CustomersPage() {
     toDate: toIso ? toIso.slice(0, 10) : "",
     sortBy,
     sortDir,
+    scopeCustomerIds: shouldApplyExplicitScopeFilters ? scopedCustomerIds : undefined,
+    scopeOwnerNames: shouldApplyExplicitScopeFilters ? scopedOwnerNames : undefined,
+    forceScopedFilter: shouldApplyExplicitScopeFilters,
+    enabled: isScopeCustomersReady,
   });
+  const isCustomersLoading = isLoading || !isScopeCustomersReady;
   const customers = data?.data ?? [];
+  const isRefreshing = isFetching && !isCustomersLoading;
   const customersVisible = useMemo(() => {
     if (quickRankFilter === "all") return customers;
     const ranked = [...customers].sort((a, b) => Number(b.total_revenue || 0) - Number(a.total_revenue || 0));
@@ -211,6 +314,48 @@ export default function CustomersPage() {
         <button onClick={() => setQuickRankFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
         <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
       </div>
+      {isSupervisor && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <Select
+            value={scopeMode}
+            onValueChange={(value: "mine" | "manager_team") => {
+              setScopeMode(value);
+              setSelectedManagerId("all");
+              setSelectedSalespersonId("all");
+            }}
+          >
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Scope" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="mine">Mine</SelectItem>
+              <SelectItem value="manager_team">Manager Team</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Manager" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Select manager</SelectItem>
+              {managerOptions.map((m) => (
+                <SelectItem key={m.user_id} value={m.user_id}>{m.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={selectedSalespersonId} onValueChange={setSelectedSalespersonId} disabled={scopeMode !== "manager_team"}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Salesperson" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All salespeople</SelectItem>
+              {filteredSalespersonOptions.map((sp) => (
+                <SelectItem key={sp.user_id} value={sp.user_id}>{sp.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Customers" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
         <div className="space-y-3">
@@ -270,7 +415,7 @@ export default function CustomersPage() {
         </div>
       </BottomSheet>
 
-      {isLoading ? (
+      {isCustomersLoading ? (
         <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
           <div className="space-y-3">
             <Skeleton className="h-10 w-full rounded-lg" />
@@ -284,7 +429,7 @@ export default function CustomersPage() {
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No customers found. Run a Shopify sync first.</p></div>
       ) : (
         <>
-          <div className="hidden md:block card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
+          <div className="relative hidden md:block card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-body">
                 <thead>
@@ -324,9 +469,10 @@ export default function CustomersPage() {
                 </tbody>
               </table>
             </div>
+            {isRefreshing && <RecordsLoadingOverlay rows={6} />}
           </div>
 
-          <div className="md:hidden space-y-3">
+          <div className="relative md:hidden space-y-3">
             {customersVisible.map((c, i) => (
               <div key={c.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
                 <div className="flex items-center gap-3 mb-3">
@@ -351,6 +497,7 @@ export default function CustomersPage() {
                 </div>
               </div>
             ))}
+            {isRefreshing && <RecordsLoadingOverlay rows={4} className="rounded-xl" />}
           </div>
           <div className="card-float p-3 overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs text-muted-foreground font-body px-2">

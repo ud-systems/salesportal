@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart, DollarSign, TrendingUp, ChevronsUpDown } from "lucide-react";
+import { Users, ShoppingCart, DollarSign, TrendingUp } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,7 +7,7 @@ import {
   useDirectReportSalesPerformance,
   useManagerSelectedSalespeopleTimeseries,
   useManagerTeamMemberOptions,
-  useOrdersTimeseriesInRange,
+  useScopeOrderTimeseries,
   useSalespeopleScopedMetricsAndSeries,
   useScopeOrderMetrics,
 } from "@/hooks/use-shopify-data";
@@ -16,10 +16,6 @@ import { formatOrderMoney } from "@/lib/format";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { differenceInCalendarDays } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Checkbox } from "@/components/ui/checkbox";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -30,9 +26,8 @@ export default function ManagerDashboardPage() {
   const [preset, setPreset] = useState<DatePreset>("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [scopeMode, setScopeMode] = useState<"all" | "selected" | "mine">("all");
-  const [selectedSalespersonIds, setSelectedSalespersonIds] = useState<string[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [scopeMode, setScopeMode] = useState<"team" | "salesperson" | "mine">("team");
+  const [selectedSalespersonId, setSelectedSalespersonId] = useState("all");
   const [quickMemberFilter, setQuickMemberFilter] = useState<"all" | "top3" | "bottom3">("all");
   const [compareEnabled, setCompareEnabled] = useState(false);
 
@@ -41,8 +36,8 @@ export default function ManagerDashboardPage() {
       preset: "month" as DatePreset,
       customFrom: "",
       customTo: "",
-      scopeMode: "all" as "all" | "selected" | "mine",
-      selectedSalespersonIds: [] as string[],
+      scopeMode: "team" as "team" | "salesperson" | "mine",
+      selectedSalespersonId: "all",
       quickMemberFilter: "all" as "all" | "top3" | "bottom3",
       compareEnabled: false,
     });
@@ -50,7 +45,7 @@ export default function ManagerDashboardPage() {
     setCustomFrom(saved.customFrom);
     setCustomTo(saved.customTo);
     setScopeMode(saved.scopeMode);
-    setSelectedSalespersonIds(saved.selectedSalespersonIds);
+    setSelectedSalespersonId(saved.selectedSalespersonId);
     setQuickMemberFilter(saved.quickMemberFilter);
     setCompareEnabled(Boolean(saved.compareEnabled));
   }, [user?.id]);
@@ -61,11 +56,11 @@ export default function ManagerDashboardPage() {
       customFrom,
       customTo,
       scopeMode,
-      selectedSalespersonIds,
+      selectedSalespersonId,
       quickMemberFilter,
       compareEnabled,
     });
-  }, [user?.id, preset, customFrom, customTo, scopeMode, selectedSalespersonIds, quickMemberFilter, compareEnabled]);
+  }, [user?.id, preset, customFrom, customTo, scopeMode, selectedSalespersonId, quickMemberFilter, compareEnabled]);
 
   const range = useMemo(
     () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
@@ -85,20 +80,21 @@ export default function ManagerDashboardPage() {
     toIso,
     Boolean(user?.id),
   );
-  const { data: allSeries = [], isLoading: loadingAllSeries } = useOrdersTimeseriesInRange(
+  const { data: allSeries = [], isLoading: loadingAllSeries } = useScopeOrderTimeseries(
+    user?.id,
     fromIso,
     toIso,
     bucket,
     "manager",
-    Boolean(user?.id) && scopeMode === "all",
+    Boolean(user?.id) && scopeMode === "team",
   );
 
   const scopedSalespersonIds = useMemo(() => {
     if (!user?.id) return [] as string[];
     if (scopeMode === "mine") return [user.id];
-    if (scopeMode === "selected") return selectedSalespersonIds;
+    if (scopeMode === "salesperson" && selectedSalespersonId !== "all") return [selectedSalespersonId];
     return [];
-  }, [scopeMode, selectedSalespersonIds, user?.id]);
+  }, [scopeMode, selectedSalespersonId, user?.id]);
 
   const { data: scopedData, isLoading: loadingScopedData } = useSalespeopleScopedMetricsAndSeries(
     scopedSalespersonIds,
@@ -106,7 +102,7 @@ export default function ManagerDashboardPage() {
     toIso,
     bucket,
     scopeKey,
-    scopeMode !== "all",
+    scopeMode !== "team",
   );
   const { data: selectedSeries = [], isLoading: loadingSelectedSeries } = useManagerSelectedSalespeopleTimeseries(
     user?.id,
@@ -115,13 +111,27 @@ export default function ManagerDashboardPage() {
     toIso,
     bucket,
     scopeKey,
-    scopeMode !== "all",
+    scopeMode !== "team",
   );
 
-  const metrics = scopeMode === "all" ? allMetrics : scopedData;
-  const series = scopeMode === "all" ? allSeries : selectedSeries;
-  const loadingMetrics = scopeMode === "all" ? loadingAllMetrics : loadingScopedData;
-  const loadingSeries = scopeMode === "all" ? loadingAllSeries : loadingSelectedSeries;
+  const scopedMetricsFromSeries = useMemo(() => {
+    if (scopeMode === "team") return null;
+    if (!selectedSeries.length) return null;
+    const revenue = selectedSeries.reduce((sum, point) => sum + Number(point.revenue || 0), 0);
+    const ordersCount = selectedSeries.reduce((sum, point) => sum + Number(point.orders || 0), 0);
+    const customersCount = Number(scopedData?.customers_count || 0);
+    return {
+      orders_count: ordersCount,
+      customers_count: customersCount,
+      revenue,
+      avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
+    };
+  }, [scopeMode, selectedSeries, scopedData?.customers_count]);
+
+  const metrics = scopeMode === "team" ? allMetrics : scopedMetricsFromSeries ?? scopedData;
+  const series = scopeMode === "team" ? allSeries : selectedSeries;
+  const loadingMetrics = scopeMode === "team" ? loadingAllMetrics : loadingScopedData || loadingSelectedSeries;
+  const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
   const quickScopedIds = useMemo(() => {
     if (quickMemberFilter === "all") return null;
     const ranked = [...teamRows].sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
@@ -131,8 +141,8 @@ export default function ManagerDashboardPage() {
 
   const filteredTeamRows = useMemo(() => {
     let rows = teamRows;
-    if (scopeMode === "selected") {
-      rows = rows.filter((row) => selectedSalespersonIds.includes(row.salesperson_user_id));
+    if (scopeMode === "salesperson" && selectedSalespersonId !== "all") {
+      rows = rows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
     }
     if (scopeMode === "mine" && user?.id) {
       rows = rows.filter((row) => row.salesperson_user_id === user.id);
@@ -141,14 +151,7 @@ export default function ManagerDashboardPage() {
       rows = rows.filter((row) => quickScopedIds.has(row.salesperson_user_id));
     }
     return rows;
-  }, [scopeMode, selectedSalespersonIds, teamRows, user?.id, quickScopedIds]);
-
-  const selectedLabel = useMemo(() => {
-    if (scopeMode === "mine") return "Mine only";
-    if (scopeMode === "all") return "All team members";
-    if (!selectedSalespersonIds.length) return "Select team members";
-    return `${selectedSalespersonIds.length} selected`;
-  }, [scopeMode, selectedSalespersonIds.length]);
+  }, [scopeMode, selectedSalespersonId, teamRows, user?.id, quickScopedIds]);
 
   return (
     <div className="w-full space-y-6">
@@ -180,56 +183,35 @@ export default function ManagerDashboardPage() {
             <Select
               value={scopeMode}
               onValueChange={(v) => {
-                setScopeMode(v as "all" | "selected" | "mine");
-                if (v !== "selected") setSelectedSalespersonIds([]);
+                setScopeMode(v as "team" | "salesperson" | "mine");
+                if (v !== "salesperson") setSelectedSalespersonId("all");
               }}
             >
               <SelectTrigger className="rounded-xl h-10 font-body">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All team performance</SelectItem>
-                <SelectItem value="selected">Selected team members</SelectItem>
-                <SelectItem value="mine">My own performance</SelectItem>
+                <SelectItem value="mine">Mine</SelectItem>
+                <SelectItem value="team">My Team</SelectItem>
+                <SelectItem value="salesperson">Salesperson</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Team members</p>
-            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-between rounded-xl h-10 font-body" disabled={scopeMode !== "selected"}>
-                  <span className="truncate">{selectedLabel}</span>
-                  <ChevronsUpDown className="h-4 w-4 opacity-60" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[280px] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search salesperson..." />
-                  <CommandList>
-                    <CommandEmpty>No salesperson found.</CommandEmpty>
-                    <CommandGroup>
-                      {teamMemberOptions.map((member) => {
-                        const checked = selectedSalespersonIds.includes(member.user_id);
-                        return (
-                          <CommandItem
-                            key={member.user_id}
-                            onSelect={() => {
-                              setSelectedSalespersonIds((prev) =>
-                                checked ? prev.filter((id) => id !== member.user_id) : [...prev, member.user_id],
-                              );
-                            }}
-                          >
-                            <Checkbox checked={checked} className="mr-2" />
-                            <span className="truncate">{member.label}</span>
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Salesperson</p>
+            <Select value={selectedSalespersonId} onValueChange={setSelectedSalespersonId} disabled={scopeMode !== "salesperson"}>
+              <SelectTrigger className="rounded-xl h-10 font-body">
+                <SelectValue placeholder="Salesperson" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Select salesperson</SelectItem>
+                {teamMemberOptions.map((member) => (
+                  <SelectItem key={member.user_id} value={member.user_id}>
+                    {member.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         {preset === "custom" && (
@@ -256,7 +238,7 @@ export default function ManagerDashboardPage() {
         </div>
       </div>
 
-      {compareEnabled && scopeMode !== "all" && (
+      {compareEnabled && scopeMode !== "team" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
             <p className="text-xs text-muted-foreground font-body">Selected Scope Revenue</p>
@@ -284,7 +266,7 @@ export default function ManagerDashboardPage() {
           <p className="text-sm text-muted-foreground font-body py-10 text-center">No trend data available yet.</p>
         ) : (
           <div className="h-[220px] min-h-[220px] min-w-0 w-full">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
               <BarChart data={series}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />

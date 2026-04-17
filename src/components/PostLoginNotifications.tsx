@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
 import { formatDisplayDateTime } from "@/lib/format";
 
 const SESSION_KEY = "uddash_notifications_dialog_seen";
@@ -45,14 +44,6 @@ export function PostLoginNotifications() {
     <Dialog open={open} onOpenChange={(v) => !v && void handleDismiss(false)}>
       <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden rounded-2xl">
         <DialogHeader className="p-4 pb-2 pr-12 space-y-1 relative">
-          <button
-            type="button"
-            aria-label="Close"
-            className="absolute right-3 top-3 rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={() => void handleDismiss(false)}
-          >
-            <X className="h-4 w-4" />
-          </button>
           <DialogTitle className="font-heading text-left">New activity</DialogTitle>
           <DialogDescription className="text-left text-sm">
             {unread.length} unread notification{unread.length === 1 ? "" : "s"} for your account.

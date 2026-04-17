@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart, DollarSign, TrendingUp, ChevronsUpDown } from "lucide-react";
+import { Users, ShoppingCart, DollarSign, TrendingUp } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useAggregateScopeMetricsForViewers,
-  useOrdersTimeseriesInRange,
+  useScopeOrderTimeseries,
   useScopeOrderMetrics,
   useSupervisorSelectedManagerTimeseries,
   useSupervisorManagerOptions,
@@ -16,10 +16,6 @@ import { formatOrderMoney } from "@/lib/format";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { differenceInCalendarDays } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Checkbox } from "@/components/ui/checkbox";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -40,9 +36,8 @@ export default function SupervisorDashboardPage() {
   const [preset, setPreset] = useState<DatePreset>("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [scopeMode, setScopeMode] = useState<"all" | "selected" | "mine">("all");
-  const [selectedManagerIds, setSelectedManagerIds] = useState<string[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [scopeMode, setScopeMode] = useState<"all" | "manager_team" | "mine">("mine");
+  const [selectedManagerId, setSelectedManagerId] = useState("all");
   const [quickManagerFilter, setQuickManagerFilter] = useState<"all" | "top3" | "bottom3">("all");
   const [compareEnabled, setCompareEnabled] = useState(false);
 
@@ -51,8 +46,8 @@ export default function SupervisorDashboardPage() {
       preset: "month" as DatePreset,
       customFrom: "",
       customTo: "",
-      scopeMode: "all" as "all" | "selected" | "mine",
-      selectedManagerIds: [] as string[],
+      scopeMode: "mine" as "all" | "manager_team" | "mine",
+      selectedManagerId: "all",
       quickManagerFilter: "all" as "all" | "top3" | "bottom3",
       compareEnabled: false,
     });
@@ -60,7 +55,7 @@ export default function SupervisorDashboardPage() {
     setCustomFrom(saved.customFrom);
     setCustomTo(saved.customTo);
     setScopeMode(saved.scopeMode);
-    setSelectedManagerIds(saved.selectedManagerIds);
+    setSelectedManagerId(saved.selectedManagerId);
     setQuickManagerFilter(saved.quickManagerFilter);
     setCompareEnabled(Boolean(saved.compareEnabled));
   }, [user?.id]);
@@ -71,11 +66,11 @@ export default function SupervisorDashboardPage() {
       customFrom,
       customTo,
       scopeMode,
-      selectedManagerIds,
+      selectedManagerId,
       quickManagerFilter,
       compareEnabled,
     });
-  }, [user?.id, preset, customFrom, customTo, scopeMode, selectedManagerIds, quickManagerFilter, compareEnabled]);
+  }, [user?.id, preset, customFrom, customTo, scopeMode, selectedManagerId, quickManagerFilter, compareEnabled]);
 
   const range = useMemo(
     () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
@@ -96,7 +91,8 @@ export default function SupervisorDashboardPage() {
     toIso,
     Boolean(user?.id),
   );
-  const { data: allSeries = [], isLoading: loadingAllSeries } = useOrdersTimeseriesInRange(
+  const { data: allSeries = [], isLoading: loadingAllSeries } = useScopeOrderTimeseries(
+    user?.id,
     fromIso,
     toIso,
     bucket,
@@ -105,10 +101,10 @@ export default function SupervisorDashboardPage() {
   );
 
   const selectedViewerIds = useMemo(() => {
-    if (scopeMode === "selected") return selectedManagerIds;
+    if (scopeMode === "manager_team" && selectedManagerId !== "all") return [selectedManagerId];
     if (scopeMode === "mine" && user?.id) return [user.id];
     return [];
-  }, [scopeMode, selectedManagerIds, user?.id]);
+  }, [scopeMode, selectedManagerId, user?.id]);
   const { data: aggregatedScopedMetrics, isLoading: loadingAggregatedScopedMetrics } = useAggregateScopeMetricsForViewers(
     selectedViewerIds,
     fromIso,
@@ -138,17 +134,13 @@ export default function SupervisorDashboardPage() {
   }, [typedRows, quickManagerFilter]);
   const filteredRows = useMemo(() => {
     let rows = typedRows;
-    if (scopeMode === "selected") rows = rows.filter((row) => selectedManagerIds.includes(row.viewer_user_id));
+    if (scopeMode === "manager_team" && selectedManagerId !== "all") {
+      rows = rows.filter((row) => row.viewer_user_id === selectedManagerId);
+    }
     if (scopeMode === "mine" && user?.id) rows = rows.filter((row) => row.viewer_user_id === user.id);
     if (quickScopedIds) rows = rows.filter((row) => quickScopedIds.has(row.viewer_user_id));
     return rows;
-  }, [scopeMode, selectedManagerIds, typedRows, user?.id, quickScopedIds]);
-  const selectedLabel = useMemo(() => {
-    if (scopeMode === "mine") return "Mine only";
-    if (scopeMode === "all") return "All managers";
-    if (!selectedManagerIds.length) return "Select managers";
-    return `${selectedManagerIds.length} selected`;
-  }, [scopeMode, selectedManagerIds.length]);
+  }, [scopeMode, selectedManagerId, typedRows, user?.id, quickScopedIds]);
 
   return (
     <div className="w-full space-y-6">
@@ -180,56 +172,35 @@ export default function SupervisorDashboardPage() {
             <Select
               value={scopeMode}
               onValueChange={(v) => {
-                setScopeMode(v as "all" | "selected" | "mine");
-                if (v !== "selected") setSelectedManagerIds([]);
+                setScopeMode(v as "all" | "manager_team" | "mine");
+                if (v !== "manager_team") setSelectedManagerId("all");
               }}
             >
               <SelectTrigger className="rounded-xl h-10 font-body">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All managers</SelectItem>
-                <SelectItem value="selected">Selected managers</SelectItem>
-                <SelectItem value="mine">My own performance</SelectItem>
+                <SelectItem value="mine">Mine</SelectItem>
+                <SelectItem value="all">My Team</SelectItem>
+                <SelectItem value="manager_team">Manager Team</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Managers</p>
-            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-between rounded-xl h-10 font-body" disabled={scopeMode !== "selected"}>
-                  <span className="truncate">{selectedLabel}</span>
-                  <ChevronsUpDown className="h-4 w-4 opacity-60" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[280px] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search manager..." />
-                  <CommandList>
-                    <CommandEmpty>No manager found.</CommandEmpty>
-                    <CommandGroup>
-                      {managerOptions.map((member) => {
-                        const checked = selectedManagerIds.includes(member.user_id);
-                        return (
-                          <CommandItem
-                            key={member.user_id}
-                            onSelect={() => {
-                              setSelectedManagerIds((prev) =>
-                                checked ? prev.filter((id) => id !== member.user_id) : [...prev, member.user_id],
-                              );
-                            }}
-                          >
-                            <Checkbox checked={checked} className="mr-2" />
-                            <span className="truncate">{member.label}</span>
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Manager</p>
+            <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
+              <SelectTrigger className="rounded-xl h-10 font-body">
+                <SelectValue placeholder="Manager" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Select manager</SelectItem>
+                {managerOptions.map((m) => (
+                  <SelectItem key={m.user_id} value={m.user_id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         {preset === "custom" && (
@@ -252,7 +223,7 @@ export default function SupervisorDashboardPage() {
           <button onClick={() => setQuickManagerFilter("all")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body transition-colors ${quickManagerFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>All</button>
           <button onClick={() => setQuickManagerFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body transition-colors ${quickManagerFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
           <button onClick={() => setQuickManagerFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body transition-colors ${quickManagerFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
-          <button onClick={() => setCompareEnabled((v) => !v)} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body transition-colors ${compareEnabled ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Compare vs full scope</button>
+          <button onClick={() => setCompareEnabled((v) => !v)} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body transition-colors ${compareEnabled ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Compare vs my team</button>
         </div>
       </div>
 
@@ -284,7 +255,7 @@ export default function SupervisorDashboardPage() {
           <p className="text-sm text-muted-foreground font-body py-10 text-center">No trend data available yet.</p>
         ) : (
           <div className="h-[220px] min-h-[220px] min-w-0 w-full">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+            <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
               <AreaChart data={series}>
                 <defs>
                   <linearGradient id="supervisorRevenueGradient" x1="0" y1="0" x2="0" y2="1">

@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { useOrderItems, useOrdersPaginated } from "@/hooks/use-shopify-data";
+import {
+  useCustomerIdsForSalespeople,
+  useManagerTeamMemberOptions,
+  useOrderItems,
+  useOrdersPaginated,
+  useSalespeopleUnderManagers,
+  useSupervisorManagerOptions,
+  useSupervisorSalespersonOptions,
+} from "@/hooks/use-shopify-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,6 +17,7 @@ import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/comp
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { useSearchParams } from "react-router-dom";
 import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -17,7 +26,8 @@ import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function OrdersPage() {
-  const { user } = useAuth();
+  const { user, isSupervisor, isManager } = useAuth();
+  const isLeader = isSupervisor || isManager;
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [searchParams] = useSearchParams();
   const initialFulfillment = (() => {
@@ -36,12 +46,135 @@ export default function OrdersPage() {
   const [toDate, setToDate] = useState("");
   const [preset, setPreset] = useState<DatePreset>("all");
   const [quickRankFilter, setQuickRankFilter] = useState<"all" | "top3" | "bottom3">("all");
+  const [scopeMode, setScopeMode] = useState<"all" | "mine" | "manager_team">("mine");
+  const [selectedManagerId, setSelectedManagerId] = useState("all");
+  const [selectedSalespersonId, setSelectedSalespersonId] = useState("all");
   const [sortBy, setSortBy] = useState<"shopify_created_at" | "processed_at" | "total" | "order_number">("shopify_created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
   const fromIso = toRangeIso(range.from);
   const toIso = toRangeIso(range.to);
+  const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, "orders-page");
+  const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, "orders-page");
+  const { data: managerTeamOptions = [] } = useManagerTeamMemberOptions(user?.id, "orders-page");
+  const { data: managerSalespeople = [] } = useSalespeopleUnderManagers(
+    selectedManagerId !== "all" ? [selectedManagerId] : [],
+    "orders-page",
+    isSupervisor && scopeMode === "manager_team" && selectedManagerId !== "all",
+  );
+  const allManagerIds = useMemo(() => managerOptions.map((m) => m.user_id), [managerOptions]);
+  const { data: allManagedSalespeople = [] } = useSalespeopleUnderManagers(
+    allManagerIds,
+    "orders-page-all-managers",
+    isSupervisor && scopeMode === "manager_team" && selectedManagerId === "all",
+  );
+  const filteredSalespersonOptions = useMemo(
+    () => {
+      if (isSupervisor) {
+        return selectedManagerId === "all"
+          ? salespersonOptions
+          : salespersonOptions.filter((sp) => managerSalespeople.includes(sp.user_id));
+      }
+      if (isManager) return managerTeamOptions;
+      return [];
+    },
+    [isSupervisor, isManager, selectedManagerId, salespersonOptions, managerSalespeople, managerTeamOptions],
+  );
+  const managerLabelById = useMemo(
+    () => new Map(managerOptions.map((m) => [m.user_id, m.label] as const)),
+    [managerOptions],
+  );
+  const scopedOwnerNames = useMemo(() => {
+    if (!isLeader || scopeMode === "all") return [] as string[];
+    if (scopeMode === "mine") {
+      return user?.salesperson_name ? [user.salesperson_name] : [];
+    }
+    if (isSupervisor) {
+      if (selectedManagerId !== "all") {
+        const managerLabel = managerLabelById.get(selectedManagerId);
+        if (selectedSalespersonId !== "all") {
+          const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+          return Array.from(new Set([selected?.label, managerLabel].filter(Boolean) as string[]));
+        }
+        return Array.from(new Set([managerLabel, ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean) as string[]));
+      }
+      if (selectedSalespersonId !== "all") {
+        const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+        return selected?.label ? [selected.label] : [];
+      }
+      return Array.from(new Set([...managerOptions.map((m) => m.label), ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean)));
+    }
+    if (selectedSalespersonId !== "all") {
+      const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+      return selected?.label ? [selected.label] : [];
+    }
+    return Array.from(new Set([user?.salesperson_name, ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean) as string[]));
+  }, [
+    isLeader,
+    scopeMode,
+    user?.salesperson_name,
+    isSupervisor,
+    selectedSalespersonId,
+    selectedManagerId,
+    filteredSalespersonOptions,
+    managerLabelById,
+    managerOptions,
+  ]);
+  const scopedSalespersonIds = useMemo(() => {
+    if (!isLeader) return [] as string[];
+    if (scopeMode === "mine") return user?.id ? [user.id] : [];
+    if (isSupervisor) {
+      if (scopeMode === "manager_team" && selectedSalespersonId !== "all") return [selectedSalespersonId];
+      if (scopeMode === "manager_team" && selectedManagerId !== "all") {
+        return Array.from(new Set([selectedManagerId, ...managerSalespeople]));
+      }
+      if (scopeMode === "manager_team") {
+        return Array.from(new Set([...allManagerIds, ...allManagedSalespeople]));
+      }
+      // "My Team": all managers under this supervisor and their salespeople.
+      return Array.from(new Set([...allManagerIds, ...allManagedSalespeople]));
+    }
+    if (isManager) {
+      if (scopeMode === "all") {
+        return Array.from(new Set([user?.id, ...managerTeamOptions.map((sp) => sp.user_id)].filter(Boolean) as string[]));
+      }
+      if (scopeMode === "manager_team" && selectedSalespersonId !== "all") return [selectedSalespersonId];
+      if (scopeMode === "manager_team") {
+        return Array.from(new Set([user?.id, ...managerTeamOptions.map((sp) => sp.user_id)].filter(Boolean) as string[]));
+      }
+    }
+    return [];
+  }, [
+    isLeader,
+    isSupervisor,
+    isManager,
+    scopeMode,
+    managerSalespeople,
+    allManagedSalespeople,
+    allManagerIds,
+    managerTeamOptions,
+    selectedManagerId,
+    selectedSalespersonId,
+    user?.id,
+  ]);
+  const shouldApplyExplicitScopeFilters = useMemo(() => {
+    if (!isLeader) return false;
+    if (isSupervisor) {
+      // Supervisor scope "all" means global supervisor scope in this page.
+      // Any narrowed scope should always apply explicit filters.
+      return scopeMode !== "all";
+    }
+    if (isManager) {
+      // Manager scope always implies team-limited querying.
+      return true;
+    }
+    return false;
+  }, [isLeader, isSupervisor, isManager, scopeMode]);
+  const shouldLoadScopedCustomerIds = shouldApplyExplicitScopeFilters && scopedSalespersonIds.length === 0;
+  const { data: scopedCustomerIdsResolved = [], isLoading: isScopeCustomersLoading2, isFetching: isScopeCustomersFetching2 } =
+    useCustomerIdsForSalespeople(scopedSalespersonIds, "orders-page", shouldLoadScopedCustomerIds);
+  const isScopeCustomersReady = !shouldLoadScopedCustomerIds || (!isScopeCustomersLoading2 && !isScopeCustomersFetching2);
 
   useEffect(() => {
     const saved = loadUserFilterPreset(user?.id, "orders-page", {
@@ -54,6 +187,9 @@ export default function OrdersPage() {
       sortBy: "shopify_created_at" as "shopify_created_at" | "processed_at" | "total" | "order_number",
       sortDir: "desc" as "asc" | "desc",
       quickRankFilter: "all" as "all" | "top3" | "bottom3",
+      scopeMode: "mine" as "all" | "mine" | "manager_team",
+      selectedManagerId: "all",
+      selectedSalespersonId: "all",
     });
     setSearch(saved.search);
     setStatusFilter(saved.statusFilter);
@@ -64,7 +200,14 @@ export default function OrdersPage() {
     setSortBy(saved.sortBy);
     setSortDir(saved.sortDir);
     setQuickRankFilter(saved.quickRankFilter);
-  }, [initialFulfillment, user?.id]);
+    const normalizedScopeMode =
+      saved.scopeMode === "all" || saved.scopeMode === "mine" || saved.scopeMode === "manager_team"
+        ? saved.scopeMode
+        : "mine";
+    setScopeMode(isSupervisor && normalizedScopeMode === "all" ? "mine" : normalizedScopeMode);
+    setSelectedManagerId(saved.selectedManagerId);
+    setSelectedSalespersonId(saved.selectedSalespersonId);
+  }, [initialFulfillment, user?.id, isSupervisor]);
 
   useEffect(() => {
     saveUserFilterPreset(user?.id, "orders-page", {
@@ -77,10 +220,13 @@ export default function OrdersPage() {
       sortBy,
       sortDir,
       quickRankFilter,
+      scopeMode,
+      selectedManagerId,
+      selectedSalespersonId,
     });
-  }, [user?.id, search, statusFilter, fulfillmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter]);
+  }, [user?.id, search, statusFilter, fulfillmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter, scopeMode, selectedManagerId, selectedSalespersonId]);
 
-  const { data, isLoading } = useOrdersPaginated({
+  const { data, isLoading, isFetching } = useOrdersPaginated({
     page,
     pageSize,
     search,
@@ -90,7 +236,14 @@ export default function OrdersPage() {
     toDate: toIso ? toIso.slice(0, 10) : "",
     sortBy,
     sortDir,
+    scopeSalespersonIds: shouldApplyExplicitScopeFilters ? scopedSalespersonIds : undefined,
+    scopeCustomerIds: shouldApplyExplicitScopeFilters ? scopedCustomerIdsResolved : undefined,
+    scopeOwnerNames: shouldApplyExplicitScopeFilters ? scopedOwnerNames : undefined,
+    forceScopedFilter: shouldApplyExplicitScopeFilters,
+    enabled: isScopeCustomersReady,
   });
+  const isOrdersLoading = isLoading || !isScopeCustomersReady;
+  const isRefreshing = isFetching && !isOrdersLoading;
   const orders = data?.data ?? [];
   const ordersVisible = useMemo(() => {
     if (quickRankFilter === "all") return orders;
@@ -185,6 +338,51 @@ export default function OrdersPage() {
         <button onClick={() => setQuickRankFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
         <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
       </div>
+      {isLeader && (
+        <div className={`grid grid-cols-1 gap-2 ${isSupervisor ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+          <Select
+            value={scopeMode}
+            onValueChange={(value: "all" | "mine" | "manager_team") => {
+              setScopeMode(value);
+              setSelectedManagerId("all");
+              setSelectedSalespersonId("all");
+            }}
+          >
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Scope" />
+            </SelectTrigger>
+            <SelectContent>
+              {!isSupervisor && <SelectItem value="all">My Team</SelectItem>}
+              <SelectItem value="mine">Mine</SelectItem>
+              <SelectItem value="manager_team">{isSupervisor ? "Manager Team" : "Salesperson"}</SelectItem>
+            </SelectContent>
+          </Select>
+          {isSupervisor && (
+            <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
+              <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                <SelectValue placeholder="Manager" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Select manager</SelectItem>
+                {managerOptions.map((m) => (
+                  <SelectItem key={m.user_id} value={m.user_id}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={selectedSalespersonId} onValueChange={setSelectedSalespersonId} disabled={scopeMode !== "manager_team"}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Salesperson" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All salespeople</SelectItem>
+              {filteredSalespersonOptions.map((sp) => (
+                <SelectItem key={sp.user_id} value={sp.user_id}>{sp.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Orders" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
         <div className="space-y-3">
@@ -235,7 +433,7 @@ export default function OrdersPage() {
         </div>
       </BottomSheet>
 
-      {isLoading ? (
+      {isOrdersLoading ? (
         <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
           <div className="space-y-3">
             <Skeleton className="h-10 w-full rounded-lg" />
@@ -249,7 +447,7 @@ export default function OrdersPage() {
         <div className="card-float p-10 text-center opacity-0 animate-fade-in"><p className="text-muted-foreground font-body">No orders found. Run a Shopify sync first.</p></div>
       ) : (
         <>
-          <div className="hidden md:block card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
+          <div className="relative hidden md:block card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-body">
                 <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Order #</th><th className="text-left py-2.5 font-medium">Customer</th><th className="text-right py-2.5 font-medium">Amount</th><th className="text-left py-2.5 font-medium">Payment</th><th className="text-left py-2.5 font-medium">Fulfillment</th><th className="text-left py-2.5 font-medium">Date</th></tr></thead>
@@ -269,9 +467,10 @@ export default function OrdersPage() {
                 </tbody>
               </table>
             </div>
+            {isRefreshing && <RecordsLoadingOverlay rows={6} />}
           </div>
 
-          <div className="md:hidden space-y-3">
+          <div className="relative md:hidden space-y-3">
             {ordersVisible.map((o, i) => (
               <div key={o.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
                 <div className="flex items-start justify-between mb-2">
@@ -287,6 +486,7 @@ export default function OrdersPage() {
                 </div>
               </div>
             ))}
+            {isRefreshing && <RecordsLoadingOverlay rows={4} className="rounded-xl" />}
           </div>
           <div className="card-float p-3 overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-xs text-muted-foreground font-body px-2">

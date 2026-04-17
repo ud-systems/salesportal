@@ -3,6 +3,7 @@ import type { UserRole } from "@/contexts/AuthContext";
 export type AppCapability =
   | "view_org_dashboard"
   | "view_salespersons_page"
+  | "view_procurement_pages"
   | "view_sync_logs"
   | "view_webhook_monitor"
   | "manage_settings"
@@ -12,6 +13,7 @@ const roleCapabilities: Record<UserRole, AppCapability[]> = {
   admin: [
     "view_org_dashboard",
     "view_salespersons_page",
+    "view_procurement_pages",
     "view_sync_logs",
     "view_webhook_monitor",
     "manage_settings",

@@ -93,19 +93,19 @@ export const ANALYTICS_REPORTS: ReportDefinition[] = [
     id: "manager_performance",
     title: "Manager performance",
     description: "Team performance rollups for users with manager role.",
-    requiresRange: false,
+    requiresRange: true,
   },
   {
     id: "supervisor_performance",
     title: "Supervisor performance",
     description: "Team performance rollups for users with supervisor role.",
-    requiresRange: false,
+    requiresRange: true,
   },
   {
     id: "team_performance",
     title: "Team performance overview",
     description: "Per-viewer team rollups across hierarchy scopes.",
-    requiresRange: false,
+    requiresRange: true,
   },
 ];
 
@@ -139,6 +139,22 @@ function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+async function getUserNameMap(viewerUserId: string | undefined, userIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!viewerUserId || !userIds.length) return map;
+  const { data, error } = await (supabase as any).rpc("get_scoped_user_display_names", {
+    _viewer_user_id: viewerUserId,
+    _target_user_ids: userIds,
+  });
+  if (error) throw error;
+  for (const row of (data ?? []) as { user_id?: string | null; display_name?: string | null }[]) {
+    const userId = String(row.user_id ?? "");
+    const displayName = String(row.display_name ?? "").trim();
+    if (userId && displayName) map.set(userId, displayName);
+  }
+  return map;
 }
 
 export async function fetchReportData(
@@ -557,9 +573,10 @@ export async function fetchReportData(
     case "manager_performance":
     case "supervisor_performance":
     case "team_performance": {
+      if (!fromIso || !toIso) throw new Error("Select a date range for this report.");
       let query = (supabase as any)
         .from("v_user_scope_performance")
-        .select("viewer_user_id, viewer_role, team_member_count, team_customers_count, team_orders_count, team_revenue");
+        .select("viewer_user_id, viewer_role, team_member_count");
 
       // Push role filtering to SQL to avoid heavy full-view scans.
       if (reportId === "manager_performance") {
@@ -570,15 +587,54 @@ export async function fetchReportData(
 
       const { data, error } = await query.order("team_revenue", { ascending: false });
       if (error) throw error;
+
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const viewerIds = Array.from(
+        new Set(rows.map((row) => String(row.viewer_user_id ?? "")).filter(Boolean)),
+      );
+      const [nameByUserId, scopedMetricsByViewer] = await Promise.all([
+        getUserNameMap(viewerUserId, viewerIds),
+        Promise.all(
+          rows.map(async (row) => {
+            const viewerId = String(row.viewer_user_id ?? "");
+            if (!viewerId) {
+              return { viewerId, metrics: { customers_count: 0, orders_count: 0, revenue: 0 } };
+            }
+            const { data: metricData, error: metricError } = await supabase.rpc("get_scope_order_metrics", {
+              _viewer_user_id: viewerId,
+              _from_iso: fromIso,
+              _to_iso: toIso,
+            });
+            if (metricError) throw metricError;
+            const metricRow = (metricData?.[0] ?? {}) as {
+              customers_count?: number;
+              orders_count?: number;
+              revenue?: number;
+            };
+            return {
+              viewerId,
+              metrics: {
+                customers_count: Number(metricRow.customers_count ?? 0),
+                orders_count: Number(metricRow.orders_count ?? 0),
+                revenue: Number(metricRow.revenue ?? 0),
+              },
+            };
+          }),
+        ),
+      ]);
+      const metricsByViewer = new Map(
+        scopedMetricsByViewer.map((entry) => [entry.viewerId, entry.metrics]),
+      );
+
       return {
-        columns: ["User ID", "Role", "Team members", "Team customers", "Team orders", "Team revenue"],
-        rows: (data ?? []).map((row: Record<string, unknown>) => [
-          String(row.viewer_user_id ?? ""),
+        columns: ["Name", "Role", "Team members", "Team customers", "Team orders", "Team revenue"],
+        rows: rows.map((row) => [
+          nameByUserId.get(String(row.viewer_user_id ?? "")) || String(row.viewer_user_id ?? ""),
           String(row.viewer_role ?? ""),
           Number(row.team_member_count ?? 0),
-          Number(row.team_customers_count ?? 0),
-          Number(row.team_orders_count ?? 0),
-          Number(row.team_revenue ?? 0),
+          Number(metricsByViewer.get(String(row.viewer_user_id ?? ""))?.customers_count ?? 0),
+          Number(metricsByViewer.get(String(row.viewer_user_id ?? ""))?.orders_count ?? 0),
+          Number(metricsByViewer.get(String(row.viewer_user_id ?? ""))?.revenue ?? 0),
         ]),
       };
     }

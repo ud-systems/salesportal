@@ -13,13 +13,19 @@ function clearInvalidStoredSession() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    const parsed = JSON.parse(raw) as {
-      currentSession?: { refresh_token?: string | null };
-      expiresAt?: number | null;
-    };
-    const refreshToken = parsed?.currentSession?.refresh_token;
-    // Stale auth blobs without refresh token trigger repeated refresh failures.
-    if (!refreshToken) {
+    const parsed = JSON.parse(raw) as
+      | { currentSession?: { refresh_token?: string | null } }
+      | { refresh_token?: string | null }
+      | null;
+    // Supabase auth storage shape differs by sdk/version; only clear when we can
+    // confidently determine a missing/invalid refresh token.
+    const refreshToken =
+      (parsed as { currentSession?: { refresh_token?: string | null } } | null)?.currentSession?.refresh_token ??
+      (parsed as { refresh_token?: string | null } | null)?.refresh_token;
+    if (typeof refreshToken === "string" && refreshToken.trim().length > 0) return;
+    if (refreshToken === null || refreshToken === undefined) return;
+    // Explicit empty token means stale/corrupt auth blob.
+    if (typeof refreshToken === "string" && refreshToken.trim().length === 0) {
       localStorage.removeItem(STORAGE_KEY);
     }
   } catch {

@@ -2,11 +2,9 @@ import { DollarSign, ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  useOrdersMetricsInRange,
   useRecentOrders,
   useRecentOrdersInRange,
-  useRevenueByMonthForYear,
-  useOrdersTimeseriesInRange,
+  useScopeOrderTimeseries,
   useScopeOrderMetrics,
   useTopCustomers,
 } from "@/hooks/use-shopify-data";
@@ -25,7 +23,6 @@ import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 export default function DashboardPage() {
   const { user } = useAuth();
   const scopeKey = user?.id ?? "anonymous";
-  const year = new Date().getUTCFullYear();
   const { data: currency = "GBP" } = useShopDisplayCurrency();
 
   const [preset, setPreset] = useState<DatePreset>("all");
@@ -53,26 +50,19 @@ export default function DashboardPage() {
     !isAll && Boolean(user?.id),
   );
   const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(5, scopeKey);
-  const { data: monthlyRevenue = [], isLoading: loadingRevenueByMonth } = useRevenueByMonthForYear(year, scopeKey);
-
-  const { data: metricsRange, isLoading: loadingMetricsRange } = useOrdersMetricsInRange(
-    fromIso,
-    toIso,
-    scopeKey,
-    !isAll,
-  );
-  const { data: metricsCompare, isLoading: loadingMetricsCompare } = useOrdersMetricsInRange(
+  const { data: metricsCompare } = useScopeOrderMetrics(
+    user?.id,
     cmpFromIso,
     cmpToIso,
-    scopeKey,
-    !isAll && Boolean(cmpFromIso && cmpToIso),
+    !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
   );
-  const { data: seriesRange = [], isLoading: loadingSeries } = useOrdersTimeseriesInRange(
-    fromIso,
-    toIso,
-    bucket,
+  const { data: chartSeries = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
+    user?.id,
+    isAll ? null : fromIso,
+    isAll ? null : toIso,
+    isAll ? "month" : bucket,
     scopeKey,
-    !isAll,
+    Boolean(user?.id),
   );
   const { data: recentFiltered = [], isLoading: loadingRecentFiltered } = useRecentOrdersInRange(
     5,
@@ -96,30 +86,16 @@ export default function DashboardPage() {
 
   const avgOrderValue = isAll ? (allMetrics?.avg_order_value ?? 0) : (rangeMetrics?.avg_order_value ?? 0);
 
-  const revenueDataAll = useMemo(() => {
-    const months = monthlyRevenue || [];
-    const nonZeroMonths = months.filter((m) => Number(m.revenue || 0) > 0 || Number(m.orders || 0) > 0);
-    if (nonZeroMonths.length >= 6) return nonZeroMonths.slice(-6);
-    if (nonZeroMonths.length > 0) return nonZeroMonths;
-    return months.slice(-6);
-  }, [monthlyRevenue]);
-
-  const chartData = useMemo(() => {
-    if (isAll) {
-      return revenueDataAll.map((m) => ({
-        label: m.month,
-        revenue: m.revenue,
-        orders: m.orders,
-      }));
-    }
-    return seriesRange.map((p) => ({ label: p.label, revenue: p.revenue, orders: p.orders }));
-  }, [isAll, revenueDataAll, seriesRange]);
+  const chartData = useMemo(
+    () => chartSeries.map((p) => ({ label: p.label, revenue: p.revenue, orders: p.orders })),
+    [chartSeries],
+  );
   const hasChartData = useMemo(
     () => chartData.some((point) => Number(point.revenue || 0) > 0 || Number(point.orders || 0) > 0),
     [chartData],
   );
 
-  const loadingChart = isAll ? loadingRevenueByMonth : loadingSeries;
+  const loadingChart = loadingSeries;
 
   const prevRevenue = metricsCompare?.revenue ?? 0;
   const revDelta =
@@ -195,7 +171,7 @@ export default function DashboardPage() {
         {!isAll && (
           <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
             Compared to previous equivalent period
-            {loadingMetricsCompare ? "" : revDelta != null ? ` · Revenue ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
+            {revDelta != null ? ` · Revenue ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
           </p>
         )}
       </div>
@@ -256,7 +232,7 @@ export default function DashboardPage() {
             <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
               <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
               <div className="flex-1 min-h-[220px] min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+                <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
                   <BarChart
                     data={chartData}
                     margin={{ top: 6, right: 0, left: 0, bottom: 0 }}
@@ -298,7 +274,7 @@ export default function DashboardPage() {
             <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
               <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
               <div className="flex-1 min-h-[220px]">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
+                <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
                   <AreaChart data={chartData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="dashboardOrdersGradient" x1="0" y1="0" x2="0" y2="1">

@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { formatDisplayDate } from "@/lib/format";
 
 export default function CollectionsPage() {
@@ -19,10 +20,11 @@ export default function CollectionsPage() {
   const [sortBy, setSortBy] = useState<"title" | "updated_at">("updated_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
-  const { data, isLoading } = useCollectionsPaginated({ page, pageSize, search, fromDate, toDate, sortBy, sortDir });
+  const { data, isLoading, isFetching } = useCollectionsPaginated({ page, pageSize, search, fromDate, toDate, sortBy, sortDir });
   const collections = data?.data ?? [];
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const isRefreshing = isFetching && !isLoading;
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -112,7 +114,7 @@ export default function CollectionsPage() {
       ) : collections.length === 0 ? (
         <div className="card-float p-10 text-center"><p className="text-muted-foreground font-body">No collections found. Run sync to import collections.</p></div>
       ) : (
-        <div className="card-float p-5 overflow-x-auto">
+        <div className="relative card-float p-5 overflow-x-auto">
           <table className="w-full text-sm font-body">
             <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5">Title</th><th className="text-left py-2.5">Handle</th><th className="text-right py-2.5">Products</th><th className="text-left py-2.5">Type</th><th className="text-left py-2.5">Updated</th></tr></thead>
             <tbody>
@@ -127,6 +129,7 @@ export default function CollectionsPage() {
               ))}
             </tbody>
           </table>
+          {isRefreshing && <RecordsLoadingOverlay rows={5} />}
         </div>
       )}
       {totalCount > 0 && (

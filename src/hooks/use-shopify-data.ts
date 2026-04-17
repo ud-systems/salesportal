@@ -37,6 +37,56 @@ export type TeamMemberOption = {
   label: string;
 };
 
+async function fetchAllScopedCustomerIdsForViewer(
+  viewerUserId: string,
+  salespersonUserIds: string[],
+): Promise<string[]> {
+  const pageSize = 1000;
+  let offset = 0;
+  const ids = new Set<string>();
+  while (true) {
+    const { data, error } = await (supabase as any).rpc("get_scoped_customer_ids_for_salespeople_paged", {
+        _viewer_user_id: viewerUserId,
+        _salesperson_user_ids: salespersonUserIds,
+        _offset: offset,
+        _limit: pageSize,
+      });
+    if (error) throw error;
+    const rows = (data ?? []) as { customer_id: string }[];
+    for (const row of rows) {
+      if (row.customer_id) ids.add(row.customer_id);
+    }
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+  return Array.from(ids);
+}
+
+async function fetchAllScopedOrderIdsForViewer(
+  viewerUserId: string,
+  salespersonUserIds: string[],
+): Promise<string[]> {
+  const pageSize = 1000;
+  let offset = 0;
+  const ids = new Set<string>();
+  while (true) {
+    const { data, error } = await (supabase as any).rpc("get_scoped_order_ids_for_salespeople_paged", {
+        _viewer_user_id: viewerUserId,
+        _salesperson_user_ids: salespersonUserIds,
+        _offset: offset,
+        _limit: pageSize,
+      });
+    if (error) throw error;
+    const rows = (data ?? []) as { order_id: string }[];
+    for (const row of rows) {
+      if (row.order_id) ids.add(row.order_id);
+    }
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+  return Array.from(ids);
+}
+
 export function useScopeOrderMetrics(
   viewerUserId: string | undefined,
   fromIso?: string | null,
@@ -163,13 +213,54 @@ export function useSupervisorManagerOptions(supervisorUserId: string | undefined
         _supervisor_user_id: supervisorUserId,
       });
       if (error) throw error;
-      return ((data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[]).map((row) => ({
-        user_id: row.viewer_user_id,
-        label: row.manager_name || "Manager",
+      const rows = (data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[];
+      return rows
+        .filter((row) => row.viewer_role === "manager")
+        .map((row) => ({
+          user_id: row.viewer_user_id,
+          label: row.manager_name || "Manager",
+        }));
+    },
+    staleTime: 60_000,
+    enabled: Boolean(supervisorUserId),
+  });
+}
+
+export function useSupervisorSalespersonOptions(supervisorUserId: string | undefined, scopeKey = "global") {
+  return useQuery({
+    queryKey: ["supervisor-salesperson-options", supervisorUserId ?? "none", scopeKey],
+    queryFn: async () => {
+      if (!supervisorUserId) return [] as TeamMemberOption[];
+      const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
+        _leader_user_id: supervisorUserId,
+        _leader_role: "supervisor",
+      });
+      if (error) throw error;
+      return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
+        user_id: row.salesperson_user_id,
+        label: row.salesperson_name || "Salesperson",
       }));
     },
     staleTime: 60_000,
     enabled: Boolean(supervisorUserId),
+  });
+}
+
+export function useCustomerIdsForSalespeople(
+  salespersonUserIds: string[],
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["customer-ids-for-salespeople", scopeKey, [...salespersonUserIds].sort().join(",")],
+    queryFn: async () => {
+      if (!salespersonUserIds.length) return [] as string[];
+      const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
+      if (!viewerUserId) return [] as string[];
+      return fetchAllScopedCustomerIdsForViewer(viewerUserId, salespersonUserIds);
+    },
+    staleTime: 60_000,
+    enabled: enabled && salespersonUserIds.length > 0,
   });
 }
 
@@ -195,17 +286,17 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     };
   }
 
-  let assignmentRows: { customer_id: string }[] = [];
-  for (const part of splitIntoChunks(salespersonUserIds, 200)) {
-    const { data, error } = await supabase
-      .from("salesperson_customer_assignments")
-      .select("customer_id")
-      .in("salesperson_user_id", part);
-    if (error) throw error;
-    assignmentRows = assignmentRows.concat((data ?? []) as { customer_id: string }[]);
+  const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
+  if (!viewerUserId) {
+    return {
+      orders_count: 0,
+      customers_count: 0,
+      revenue: 0,
+      avg_order_value: 0,
+      series: [],
+    };
   }
-
-  const customerIds = Array.from(new Set(assignmentRows.map((r) => r.customer_id).filter(Boolean)));
+  const customerIds = await fetchAllScopedCustomerIdsForViewer(viewerUserId, salespersonUserIds);
   if (!customerIds.length) {
     return {
       orders_count: 0,
@@ -230,36 +321,43 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     new Set(customerRows.map((r) => r.shopify_customer_id).filter((v): v is string => Boolean(v))),
   );
 
+  const fromTs = fromIso ? new Date(fromIso).getTime() : null;
+  const toTs = toIso ? new Date(toIso).getTime() : null;
+  const isInRange = (iso: string) => {
+    const ts = new Date(iso).getTime();
+    if (Number.isNaN(ts)) return false;
+    if (fromTs !== null && ts < fromTs) return false;
+    if (toTs !== null && ts > toTs) return false;
+    return true;
+  };
+
   const orderMap = new Map<string, { total: number; at: string }>();
   const absorbOrders = (rows: { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]) => {
     for (const row of rows) {
       if (orderMap.has(row.id)) continue;
       const at = row.shopify_created_at || row.created_at;
       if (!at) continue;
+      if (!isInRange(at)) continue;
       orderMap.set(row.id, { total: Number(row.total || 0), at });
     }
   };
 
   for (const part of splitIntoChunks(customerIds, 200)) {
-    let query = supabase
+    const query = supabase
       .from("shopify_orders")
       .select("id, total, shopify_created_at, created_at")
       .in("customer_id", part);
-    if (fromIso) query = query.gte("shopify_created_at", fromIso);
-    if (toIso) query = query.lte("shopify_created_at", toIso);
     const { data, error } = await query;
     if (error) throw error;
     absorbOrders((data ?? []) as { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]);
   }
 
   for (const part of splitIntoChunks(shopifyCustomerIds, 200)) {
-    let query = supabase
+    const query = supabase
       .from("shopify_orders")
       .select("id, total, shopify_created_at, created_at")
       .is("customer_id", null)
       .in("shopify_customer_id", part);
-    if (fromIso) query = query.gte("shopify_created_at", fromIso);
-    if (toIso) query = query.lte("shopify_created_at", toIso);
     const { data, error } = await query;
     if (error) throw error;
     absorbOrders((data ?? []) as { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]);
@@ -502,6 +600,10 @@ type CustomerQueryParams = {
   toDate?: string;
   sortBy?: "total_revenue" | "total_orders" | "shopify_created_at" | "name";
   sortDir?: "asc" | "desc";
+  scopeCustomerIds?: string[];
+  scopeOwnerNames?: string[];
+  forceScopedFilter?: boolean;
+  enabled?: boolean;
 };
 
 export function useCustomers() {
@@ -540,10 +642,35 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
     toDate,
     sortBy = "total_revenue",
     sortDir = "desc",
+    scopeCustomerIds = [],
+    scopeOwnerNames = [],
+    forceScopedFilter = false,
+    enabled = true,
   } = params;
+  const scopeKey = [...scopeCustomerIds].sort().join(",");
+  const ownerScopeKey = [...scopeOwnerNames].map((name) => name.trim()).filter(Boolean).sort().join(",");
   return useQuery({
-    queryKey: ["shopify-customers", page, pageSize, search, cityFilter, assignmentFilter, fromDate, toDate, sortBy, sortDir],
+    queryKey: [
+      "shopify-customers",
+      page,
+      pageSize,
+      search,
+      cityFilter,
+      assignmentFilter,
+      fromDate,
+      toDate,
+      sortBy,
+      sortDir,
+      scopeKey,
+      ownerScopeKey,
+    ],
     queryFn: async () => {
+      const scopedCustomerIdsFinal = Array.from(new Set(scopeCustomerIds.filter(Boolean)));
+      const requestedScopedFilter =
+        forceScopedFilter || (params.scopeCustomerIds?.length ?? 0) > 0 || (params.scopeOwnerNames?.length ?? 0) > 0;
+      if (requestedScopedFilter && scopedCustomerIdsFinal.length === 0) {
+        return { data: [], count: 0 };
+      }
       let query = supabase
         .from("shopify_customers")
         .select("*", { count: "exact" })
@@ -562,14 +689,100 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       } else if (assignmentFilter === "unassigned") {
         query = query.or("sp_assigned.is.null,sp_assigned.eq.Unassigned");
       }
+      if (scopedCustomerIdsFinal.length > 0) {
+        // Large `.in(...)` lists can exceed URL limits on PostgREST.
+        // Fetch in chunks and paginate in-memory to avoid oversized query strings.
+        const allRows: any[] = [];
+        const seenCustomerIds = new Set<string>();
+        for (const part of splitIntoChunks(scopedCustomerIdsFinal, 150)) {
+          const batchSize = 1000;
+          let offset = 0;
+          while (true) {
+            let scopedChunkQuery = supabase
+              .from("shopify_customers")
+              .select("*")
+              .in("id", part);
+            if (q) {
+              const escaped = q.replace(/[%_]/g, "");
+              scopedChunkQuery = scopedChunkQuery.or(`name.ilike.%${escaped}%,city.ilike.%${escaped}%,email.ilike.%${escaped}%`);
+            }
+            if (cityFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("city", cityFilter);
+            if (fromDate) scopedChunkQuery = scopedChunkQuery.gte("shopify_created_at", `${fromDate}T00:00:00.000Z`);
+            if (toDate) scopedChunkQuery = scopedChunkQuery.lte("shopify_created_at", `${toDate}T23:59:59.999Z`);
+            if (assignmentFilter === "assigned") {
+              scopedChunkQuery = scopedChunkQuery.not("sp_assigned", "is", null).neq("sp_assigned", "Unassigned");
+            } else if (assignmentFilter === "unassigned") {
+              scopedChunkQuery = scopedChunkQuery.or("sp_assigned.is.null,sp_assigned.eq.Unassigned");
+            }
+
+            const { data: chunkRows, error: chunkError } = await scopedChunkQuery.range(offset, offset + batchSize - 1);
+            if (chunkError) throw chunkError;
+
+            const rows = chunkRows ?? [];
+            for (const row of rows) {
+              if (!row?.id || seenCustomerIds.has(row.id)) continue;
+              seenCustomerIds.add(row.id);
+              allRows.push(row);
+            }
+            if (rows.length < batchSize) break;
+            offset += batchSize;
+          }
+        }
+
+        const dir = sortDir === "asc" ? 1 : -1;
+        const toComparable = (value: unknown): number | string => {
+          if (value === null || value === undefined) return "";
+          if (typeof value === "number") return value;
+          if (typeof value === "string") {
+            const asTime = Date.parse(value);
+            if (!Number.isNaN(asTime)) return asTime;
+            const asNum = Number(value);
+            return Number.isNaN(asNum) ? value.toLowerCase() : asNum;
+          }
+          return String(value).toLowerCase();
+        };
+
+        allRows.sort((a, b) => {
+          const av = toComparable(a?.[sortBy]);
+          const bv = toComparable(b?.[sortBy]);
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        });
+
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize;
+        return { data: allRows.slice(from, to), count: allRows.length };
+      }
 
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
-      if (error) throw error;
+      if (error) {
+        console.error("useCustomersPaginated failed", {
+          message: error.message,
+          details: (error as { details?: string }).details,
+          hint: (error as { hint?: string }).hint,
+          code: (error as { code?: string }).code,
+          params: {
+            page,
+            pageSize,
+            search,
+            cityFilter,
+            assignmentFilter,
+            fromDate,
+            toDate,
+            sortBy,
+            sortDir,
+            scopeCustomerIdsCount: scopeCustomerIds.length,
+          },
+        });
+        throw error;
+      }
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    enabled,
   });
 }
 
@@ -908,7 +1121,21 @@ export function useScopeOrderTimeseries(
         _to_iso: toIso ?? null,
         _bucket: bucket,
       });
-      if (error) throw error;
+      if (error) {
+        console.error("useScopeOrderTimeseries failed", {
+          message: error.message,
+          details: (error as { details?: string }).details,
+          hint: (error as { hint?: string }).hint,
+          code: (error as { code?: string }).code,
+          params: {
+            viewerUserId,
+            fromIso: fromIso ?? null,
+            toIso: toIso ?? null,
+            bucket,
+          },
+        });
+        throw error;
+      }
       return ((data ?? []) as { bucket_label?: string; revenue?: number; orders_count?: number }[]).map((row) => ({
         label: String(row.bucket_label ?? ""),
         revenue: Number(row.revenue || 0),
@@ -958,6 +1185,11 @@ type OrdersQueryParams = {
   toDate?: string;
   sortBy?: "shopify_created_at" | "processed_at" | "total" | "order_number";
   sortDir?: "asc" | "desc";
+  scopeSalespersonIds?: string[];
+  scopeCustomerIds?: string[];
+  scopeOwnerNames?: string[];
+  forceScopedFilter?: boolean;
+  enabled?: boolean;
 };
 
 export function useOrdersPaginated(params: OrdersQueryParams) {
@@ -971,9 +1203,31 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
     toDate,
     sortBy = "shopify_created_at",
     sortDir = "desc",
+    scopeSalespersonIds = [],
+    scopeCustomerIds = [],
+    scopeOwnerNames = [],
+    forceScopedFilter = false,
+    enabled = true,
   } = params;
+  const salespersonScopeKey = [...scopeSalespersonIds].sort().join(",");
+  const scopeKey = [...scopeCustomerIds].sort().join(",");
+  const ownerScopeKey = [...scopeOwnerNames].map((name) => name.trim()).filter(Boolean).sort().join(",");
   return useQuery({
-    queryKey: ["shopify-orders", page, pageSize, search, statusFilter, fulfillmentFilter, fromDate, toDate, sortBy, sortDir],
+    queryKey: [
+      "shopify-orders",
+      page,
+      pageSize,
+      search,
+      statusFilter,
+      fulfillmentFilter,
+      fromDate,
+      toDate,
+      sortBy,
+      sortDir,
+      salespersonScopeKey,
+      scopeKey,
+      ownerScopeKey,
+    ],
     queryFn: async () => {
       let query = supabase
         .from("shopify_orders")
@@ -988,13 +1242,216 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
       if (fulfillmentFilter !== "all") query = query.eq("fulfillment_status", fulfillmentFilter);
       if (fromDate) query = query.gte("shopify_created_at", `${fromDate}T00:00:00.000Z`);
       if (toDate) query = query.lte("shopify_created_at", `${toDate}T23:59:59.999Z`);
+      const requestedScopedFilter =
+        forceScopedFilter ||
+        (params.scopeSalespersonIds?.length ?? 0) > 0 ||
+        (params.scopeCustomerIds?.length ?? 0) > 0 ||
+        (params.scopeOwnerNames?.length ?? 0) > 0;
+      const scopedCustomerIdsFinal = Array.from(new Set(scopeCustomerIds.filter(Boolean)));
+      if (scopeSalespersonIds.length > 0) {
+        const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
+        if (!viewerUserId) return { data: [], count: 0 };
+        const scopedOrderIds = await fetchAllScopedOrderIdsForViewer(viewerUserId, scopeSalespersonIds);
+        if (!scopedOrderIds.length) return { data: [], count: 0 };
+
+        const allRows: any[] = [];
+        const seenOrderIds = new Set<string>();
+        for (const part of splitIntoChunks(scopedOrderIds, 150)) {
+          const batchSize = 1000;
+          let offset = 0;
+          while (true) {
+            let scopedChunkQuery = supabase
+              .from("shopify_orders")
+              .select("*")
+              .in("id", part);
+            if (q) {
+              const escaped = q.replace(/[%_]/g, "");
+              scopedChunkQuery = scopedChunkQuery.or(`order_number.ilike.%${escaped}%,customer_name.ilike.%${escaped}%`);
+            }
+            if (statusFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("financial_status", statusFilter);
+            if (fulfillmentFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("fulfillment_status", fulfillmentFilter);
+            if (fromDate) scopedChunkQuery = scopedChunkQuery.gte("shopify_created_at", `${fromDate}T00:00:00.000Z`);
+            if (toDate) scopedChunkQuery = scopedChunkQuery.lte("shopify_created_at", `${toDate}T23:59:59.999Z`);
+
+            const { data: chunkRows, error: chunkError } = await scopedChunkQuery.range(offset, offset + batchSize - 1);
+            if (chunkError) throw chunkError;
+
+            const rows = chunkRows ?? [];
+            for (const row of rows) {
+              if (!row?.id || seenOrderIds.has(row.id)) continue;
+              seenOrderIds.add(row.id);
+              allRows.push(row);
+            }
+            if (rows.length < batchSize) break;
+            offset += batchSize;
+          }
+        }
+
+        const dir = sortDir === "asc" ? 1 : -1;
+        const toComparable = (value: unknown): number | string => {
+          if (value === null || value === undefined) return "";
+          if (typeof value === "number") return value;
+          if (typeof value === "string") {
+            const asTime = Date.parse(value);
+            if (!Number.isNaN(asTime)) return asTime;
+            const asNum = Number(value);
+            return Number.isNaN(asNum) ? value.toLowerCase() : asNum;
+          }
+          return String(value).toLowerCase();
+        };
+
+        allRows.sort((a, b) => {
+          const av = toComparable(a?.[sortBy]);
+          const bv = toComparable(b?.[sortBy]);
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        });
+
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize;
+        return { data: allRows.slice(from, to), count: allRows.length };
+      }
+      if (requestedScopedFilter && scopedCustomerIdsFinal.length === 0) {
+        return { data: [], count: 0 };
+      }
+      if (scopedCustomerIdsFinal.length > 0) {
+        // Large `.in(...)` lists can exceed URL limits on PostgREST.
+        // Fetch in chunks and paginate in-memory to avoid 400 Bad Request.
+        const allRows: any[] = [];
+        const seenOrderIds = new Set<string>();
+        let scopedShopifyCustomerIds: string[] = [];
+        for (const part of splitIntoChunks(scopedCustomerIdsFinal, 200)) {
+          const { data: customerRows, error: customerRowsError } = await supabase
+            .from("shopify_customers")
+            .select("shopify_customer_id")
+            .in("id", part);
+          if (customerRowsError) throw customerRowsError;
+          for (const row of (customerRows ?? []) as { shopify_customer_id: string | null }[]) {
+            if (row.shopify_customer_id) scopedShopifyCustomerIds.push(row.shopify_customer_id);
+          }
+        }
+        scopedShopifyCustomerIds = Array.from(new Set(scopedShopifyCustomerIds));
+        for (const part of splitIntoChunks(scopedCustomerIdsFinal, 150)) {
+          const batchSize = 1000;
+          let offset = 0;
+          while (true) {
+            let scopedChunkQuery = supabase
+              .from("shopify_orders")
+              .select("*")
+              .in("customer_id", part);
+            if (q) {
+              const escaped = q.replace(/[%_]/g, "");
+              scopedChunkQuery = scopedChunkQuery.or(`order_number.ilike.%${escaped}%,customer_name.ilike.%${escaped}%`);
+            }
+            if (statusFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("financial_status", statusFilter);
+            if (fulfillmentFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("fulfillment_status", fulfillmentFilter);
+            if (fromDate) scopedChunkQuery = scopedChunkQuery.gte("shopify_created_at", `${fromDate}T00:00:00.000Z`);
+            if (toDate) scopedChunkQuery = scopedChunkQuery.lte("shopify_created_at", `${toDate}T23:59:59.999Z`);
+
+            const { data: chunkRows, error: chunkError } = await scopedChunkQuery.range(offset, offset + batchSize - 1);
+            if (chunkError) throw chunkError;
+
+            const rows = chunkRows ?? [];
+            for (const row of rows) {
+              if (!row?.id || seenOrderIds.has(row.id)) continue;
+              seenOrderIds.add(row.id);
+              allRows.push(row);
+            }
+            if (rows.length < batchSize) break;
+            offset += batchSize;
+          }
+        }
+        for (const part of splitIntoChunks(scopedShopifyCustomerIds, 150)) {
+          const batchSize = 1000;
+          let offset = 0;
+          while (true) {
+            let scopedByShopifyCustomerQuery = supabase
+              .from("shopify_orders")
+              .select("*")
+              .is("customer_id", null)
+              .in("shopify_customer_id", part);
+            if (q) {
+              const escaped = q.replace(/[%_]/g, "");
+              scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.or(
+                `order_number.ilike.%${escaped}%,customer_name.ilike.%${escaped}%`,
+              );
+            }
+            if (statusFilter !== "all") scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.eq("financial_status", statusFilter);
+            if (fulfillmentFilter !== "all") scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.eq("fulfillment_status", fulfillmentFilter);
+            if (fromDate) scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.gte("shopify_created_at", `${fromDate}T00:00:00.000Z`);
+            if (toDate) scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.lte("shopify_created_at", `${toDate}T23:59:59.999Z`);
+
+            const { data: chunkRows, error: chunkError } = await scopedByShopifyCustomerQuery.range(
+              offset,
+              offset + batchSize - 1,
+            );
+            if (chunkError) throw chunkError;
+
+            const rows = chunkRows ?? [];
+            for (const row of rows) {
+              if (!row?.id || seenOrderIds.has(row.id)) continue;
+              seenOrderIds.add(row.id);
+              allRows.push(row);
+            }
+            if (rows.length < batchSize) break;
+            offset += batchSize;
+          }
+        }
+
+        const dir = sortDir === "asc" ? 1 : -1;
+        const toComparable = (value: unknown): number | string => {
+          if (value === null || value === undefined) return "";
+          if (typeof value === "number") return value;
+          if (typeof value === "string") {
+            const asTime = Date.parse(value);
+            if (!Number.isNaN(asTime)) return asTime;
+            const asNum = Number(value);
+            return Number.isNaN(asNum) ? value.toLowerCase() : asNum;
+          }
+          return String(value).toLowerCase();
+        };
+
+        allRows.sort((a, b) => {
+          const av = toComparable(a?.[sortBy]);
+          const bv = toComparable(b?.[sortBy]);
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        });
+
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize;
+        return { data: allRows.slice(from, to), count: allRows.length };
+      }
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
-      if (error) throw error;
+      if (error) {
+        console.error("useOrdersPaginated failed", {
+          message: error.message,
+          details: (error as { details?: string }).details,
+          hint: (error as { hint?: string }).hint,
+          code: (error as { code?: string }).code,
+          params: {
+            page,
+            pageSize,
+            search,
+            statusFilter,
+            fulfillmentFilter,
+            fromDate,
+            toDate,
+            sortBy,
+            sortDir,
+            scopeCustomerIdsCount: scopeCustomerIds.length,
+          },
+        });
+        throw error;
+      }
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    enabled,
   });
 }
 
