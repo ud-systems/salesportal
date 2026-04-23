@@ -19,6 +19,13 @@ const roleCapabilities: Record<UserRole, AppCapability[]> = {
     "manage_settings",
     "manage_users",
   ],
+  owner: [
+    "view_org_dashboard",
+    "view_salespersons_page",
+    "view_procurement_pages",
+    "view_sync_logs",
+    "manage_users",
+  ],
   supervisor: [
     "view_org_dashboard",
     "view_salespersons_page",

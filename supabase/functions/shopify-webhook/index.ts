@@ -558,7 +558,7 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (!o) return;
       const userIds = new Set<string>();
-      const { data: admins } = await supabase.from("user_roles").select("user_id").eq("role", "admin");
+      const { data: admins } = await supabase.from("user_roles").select("user_id").in("role", ["admin", "owner"]);
       for (const r of admins || []) {
         const id = (r as { user_id: string }).user_id;
         if (id) userIds.add(id);
@@ -608,7 +608,7 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (!c) return;
       const userIds = new Set<string>();
-      const { data: admins } = await supabase.from("user_roles").select("user_id").eq("role", "admin");
+      const { data: admins } = await supabase.from("user_roles").select("user_id").in("role", ["admin", "owner"]);
       for (const r of admins || []) {
         const id = (r as { user_id: string }).user_id;
         if (id) userIds.add(id);

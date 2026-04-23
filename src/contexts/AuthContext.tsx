@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import { resolveCapabilities, type AppCapability } from "@/lib/auth-capabilities";
 
-export type UserRole = "admin" | "supervisor" | "manager" | "salesperson";
+export type UserRole = "admin" | "owner" | "supervisor" | "manager" | "salesperson";
 
 export interface AppUser {
   id: string;
@@ -38,7 +38,7 @@ function getInitials(email: string, name?: string): string {
   return email.slice(0, 2).toUpperCase();
 }
 
-const rolePriority: UserRole[] = ["admin", "supervisor", "manager", "salesperson"];
+const rolePriority: UserRole[] = ["admin", "owner", "supervisor", "manager", "salesperson"];
 
 function pickPrimaryRole(roles: UserRole[]): UserRole {
   for (const role of rolePriority) {
@@ -158,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         capabilities,
         hasCapability,
-        isAdmin: user?.roles.includes("admin") ?? false,
+        isAdmin: !!user?.roles.some((role) => role === "admin" || role === "owner"),
         isSupervisor: user?.roles.includes("supervisor") ?? false,
         isManager: user?.roles.includes("manager") ?? false,
       }}

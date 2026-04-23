@@ -37,7 +37,7 @@ export type ListedAppUser = {
   email: string | null;
   full_name: string;
   created_at: string;
-  role: "admin" | "supervisor" | "manager" | "salesperson" | null;
+  role: "admin" | "owner" | "supervisor" | "manager" | "salesperson" | null;
   salesperson_name: string | null;
   has_role_row: boolean;
 };
@@ -75,7 +75,7 @@ type FormState = {
   email: string;
   password: string;
   full_name: string;
-  role: "admin" | "supervisor" | "manager" | "salesperson";
+  role: "admin" | "owner" | "supervisor" | "manager" | "salesperson";
   salesperson_name: string;
 };
 
@@ -97,6 +97,10 @@ const emptyForm = (): FormState => ({
   role: "salesperson",
   salesperson_name: "",
 });
+
+function isAdminLevelRole(role: ListedAppUser["role"] | FormState["role"]) {
+  return role === "admin" || role === "owner";
+}
 
 export function SettingsUserManagement() {
   const { user: currentUser } = useAuth();
@@ -188,7 +192,7 @@ export function SettingsUserManagement() {
     } else if (form.password.length > 0 && form.password.length < MIN_PASSWORD_LEN) {
       return `New password must be at least ${MIN_PASSWORD_LEN} characters.`;
     }
-    if (form.role !== "admin" && !form.salesperson_name.trim()) {
+    if (!isAdminLevelRole(form.role) && !form.salesperson_name.trim()) {
       return "Salesperson display name is required for non-admin accounts (used for Shopify assignment matching).";
     }
     return null;
@@ -209,7 +213,7 @@ export function SettingsUserManagement() {
           password: form.password,
           full_name: form.full_name.trim(),
           role: form.role,
-          salesperson_name: form.role === "admin" ? "" : form.salesperson_name.trim(),
+          salesperson_name: isAdminLevelRole(form.role) ? "" : form.salesperson_name.trim(),
         });
         toast.success("User created");
       } else if (editing) {
@@ -222,8 +226,8 @@ export function SettingsUserManagement() {
         if (form.password.trim()) payload.password = form.password;
         if (editing.role !== form.role) {
           payload.role = form.role;
-          if (form.role !== "admin") payload.salesperson_name = form.salesperson_name.trim();
-        } else if (form.role !== "admin" && form.salesperson_name.trim() !== (editing.salesperson_name || "")) {
+          if (!isAdminLevelRole(form.role)) payload.salesperson_name = form.salesperson_name.trim();
+        } else if (!isAdminLevelRole(form.role) && form.salesperson_name.trim() !== (editing.salesperson_name || "")) {
           payload.salesperson_name = form.salesperson_name.trim();
         }
         await invokeAdminUsers(payload);
@@ -333,7 +337,7 @@ export function SettingsUserManagement() {
         <Label>Role</Label>
         <Select
           value={form.role}
-          onValueChange={(v) => setForm((f) => ({ ...f, role: v as "admin" | "supervisor" | "manager" | "salesperson" }))}
+          onValueChange={(v) => setForm((f) => ({ ...f, role: v as "admin" | "owner" | "supervisor" | "manager" | "salesperson" }))}
           disabled={saving}
         >
           <SelectTrigger className="w-full">
@@ -341,13 +345,14 @@ export function SettingsUserManagement() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="admin">Admin</SelectItem>
+            <SelectItem value="owner">Owner</SelectItem>
             <SelectItem value="supervisor">Supervisor</SelectItem>
             <SelectItem value="manager">Manager</SelectItem>
             <SelectItem value="salesperson">Salesperson</SelectItem>
           </SelectContent>
         </Select>
       </div>
-      {form.role !== "admin" && (
+      {!isAdminLevelRole(form.role) && (
         <div className="space-y-2">
           <Label htmlFor="um-sp">Salesperson label</Label>
           <Input
@@ -379,7 +384,7 @@ export function SettingsUserManagement() {
 
   const managerOptions = users.filter((u) => u.role === "manager");
   const supervisorOptions = users.filter((u) => u.role === "supervisor");
-  const memberOptions = users.filter((u) => u.role !== "admin");
+  const memberOptions = users.filter((u) => !isAdminLevelRole(u.role));
 
   return (
     <div className="space-y-6">
@@ -477,7 +482,7 @@ export function SettingsUserManagement() {
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2 text-xs font-body">
-                    <span className={cn("px-2 py-1 rounded-lg bg-muted", u.role === "admin" && "bg-primary/10 text-primary")}>
+                    <span className={cn("px-2 py-1 rounded-lg bg-muted", isAdminLevelRole(u.role) && "bg-primary/10 text-primary")}>
                       {u.role || "No role"}
                     </span>
                     {u.salesperson_name && (

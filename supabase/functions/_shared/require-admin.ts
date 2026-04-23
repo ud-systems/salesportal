@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 /**
  * Call when Edge Function gateway has verify_jwt = false.
- * Validates the caller's Bearer JWT via Auth API and enforces admin role.
+ * Validates the caller's Bearer JWT via Auth API and enforces admin-level role.
  */
 export async function requireAdmin(
   req: Request,
@@ -44,11 +44,12 @@ export async function requireAdmin(
     .from("user_roles")
     .select("role")
     .eq("user_id", user.id)
-    .eq("role", "admin")
+    .in("role", ["admin", "owner"])
+    .limit(1)
     .maybeSingle();
 
   if (!roleData) {
-    return new Response(JSON.stringify({ error: "Only admins can access this endpoint" }), {
+    return new Response(JSON.stringify({ error: "Only admin-level users can access this endpoint" }), {
       status: 403,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

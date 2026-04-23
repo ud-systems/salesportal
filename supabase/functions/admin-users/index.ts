@@ -4,7 +4,7 @@ import { requireAdmin } from "../_shared/require-admin.ts";
 
 const MIN_PASSWORD_LEN = 8;
 
-type AppRole = "admin" | "supervisor" | "manager" | "salesperson";
+type AppRole = "admin" | "owner" | "supervisor" | "manager" | "salesperson";
 
 function jsonErr(msg: string, status: number) {
   return new Response(JSON.stringify({ error: msg }), {
@@ -20,7 +20,11 @@ function jsonOk(data: unknown) {
   });
 }
 
-const rolePriority: AppRole[] = ["admin", "supervisor", "manager", "salesperson"];
+const rolePriority: AppRole[] = ["admin", "owner", "supervisor", "manager", "salesperson"];
+
+function isAdminLevelRole(role: AppRole) {
+  return role === "admin" || role === "owner";
+}
 
 function isValidRole(role: string): role is AppRole {
   return rolePriority.includes(role as AppRole);
@@ -36,8 +40,8 @@ function pickRoleRow(rows: { role: AppRole; salesperson_name: string | null }[])
 }
 
 function buildRoleRows(role: AppRole, salespersonName: string | null) {
-  if (role === "admin") {
-    return [{ role: "admin" as const, salesperson_name: null }];
+  if (isAdminLevelRole(role)) {
+    return [{ role, salesperson_name: null }];
   }
   if (role === "salesperson") {
     return [{ role: "salesperson" as const, salesperson_name: salespersonName }];
@@ -108,7 +112,7 @@ async function handleCreate(
     return jsonErr(`Password must be at least ${MIN_PASSWORD_LEN} characters`, 400);
   }
   if (!isValidRole(role)) return jsonErr("Invalid role", 400);
-  if (role !== "admin" && !salesperson_name) {
+  if (!isAdminLevelRole(role) && !salesperson_name) {
     salesperson_name = full_name || email.split("@")[0] || "Salesperson";
   }
 
@@ -124,7 +128,7 @@ async function handleCreate(
   const user = authData.user;
   if (!user) return jsonErr("User creation failed", 500);
 
-  const roleRows = buildRoleRows(role, role === "admin" ? null : salesperson_name);
+  const roleRows = buildRoleRows(role, isAdminLevelRole(role) ? null : salesperson_name);
   const { error: roleErr } = await supabase.from("user_roles").insert(
     roleRows.map((row) => ({
       user_id: user.id,
@@ -193,18 +197,18 @@ async function handleUpdate(
     if (!isValidRole(role)) return jsonErr("Invalid role", 400);
 
     const { data: currentRows } = await supabase.from("user_roles").select("role").eq("user_id", user_id);
-    const wasAdmin = currentRows?.some((r) => r.role === "admin");
+    const wasAdmin = currentRows?.some((r) => isAdminLevelRole(r.role as AppRole));
 
-    if (wasAdmin && role !== "admin" && callerId === user_id) {
+    if (wasAdmin && !isAdminLevelRole(role) && callerId === user_id) {
       const { count } = await supabase
         .from("user_roles")
         .select("*", { count: "exact", head: true })
-        .eq("role", "admin");
+        .in("role", ["admin", "owner"]);
       if ((count ?? 0) <= 1) return jsonErr("Cannot demote the only admin", 400);
     }
 
-    let spName: string | null = role === "admin" ? null : (salesperson_name_in ?? "");
-    if (role !== "admin" && !spName) {
+    let spName: string | null = isAdminLevelRole(role) ? null : (salesperson_name_in ?? "");
+    if (!isAdminLevelRole(role) && !spName) {
       const meta = existingUser.user_metadata as Record<string, string | undefined>;
       spName =
         meta?.full_name ||
@@ -228,13 +232,13 @@ async function handleUpdate(
       .from("user_roles")
       .select("role")
       .eq("user_id", user_id);
-    const hasNonAdminRole = !!rows?.some((r) => r.role !== "admin");
+    const hasNonAdminRole = !!rows?.some((r) => !isAdminLevelRole(r.role as AppRole));
     if (!hasNonAdminRole) return jsonErr("User does not have a sales role", 400);
     const { error } = await supabase
       .from("user_roles")
       .update({ salesperson_name: salesperson_name_in || null })
       .eq("user_id", user_id)
-      .neq("role", "admin");
+      .not("role", "in", "(admin,owner)");
     if (error) return jsonErr(error.message, 500);
   }
 
@@ -251,12 +255,12 @@ async function handleDelete(
   if (user_id === callerId) return jsonErr("You cannot delete your own account", 400);
 
   const { data: rows } = await supabase.from("user_roles").select("role").eq("user_id", user_id);
-  const isAdmin = rows?.some((r) => r.role === "admin");
+  const isAdmin = rows?.some((r) => isAdminLevelRole(r.role as AppRole));
   if (isAdmin) {
     const { count } = await supabase
       .from("user_roles")
       .select("*", { count: "exact", head: true })
-      .eq("role", "admin");
+      .in("role", ["admin", "owner"]);
     if ((count ?? 0) <= 1) return jsonErr("Cannot delete the only admin user", 400);
   }
 
