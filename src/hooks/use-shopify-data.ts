@@ -123,13 +123,19 @@ export function useScopeOrderMetrics(
   });
 }
 
-export function useSalespersonPerformance(scopeKey = "global") {
+export function useSalespersonPerformance(
+  scopeKey = "global",
+  fromIso: string | null | undefined = null,
+  toIso: string | null | undefined = null,
+) {
   return useQuery({
-    queryKey: ["salesperson-performance", scopeKey],
+    queryKey: ["salesperson-performance", scopeKey, fromIso ?? "none", toIso ?? "none"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
         _leader_user_id: null,
         _leader_role: null,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
       });
       if (error) throw error;
       return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
@@ -147,14 +153,18 @@ export function useDirectReportSalesPerformance(
   leaderUserId: string | undefined,
   leaderRole: "manager" | "supervisor",
   scopeKey = "global",
+  fromIso: string | null | undefined = null,
+  toIso: string | null | undefined = null,
 ) {
   return useQuery({
-    queryKey: ["direct-report-sales-performance", leaderUserId ?? "none", leaderRole, scopeKey],
+    queryKey: ["direct-report-sales-performance", leaderUserId ?? "none", leaderRole, scopeKey, fromIso ?? "none", toIso ?? "none"],
     queryFn: async () => {
       if (!leaderUserId) return [];
       const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
         _leader_user_id: leaderUserId,
         _leader_role: leaderRole,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
       });
       if (error) throw error;
       return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
@@ -169,13 +179,26 @@ export function useDirectReportSalesPerformance(
   });
 }
 
-export function useSupervisorManagerScopePerformance(supervisorUserId: string | undefined, scopeKey = "global") {
+export function useSupervisorManagerScopePerformance(
+  supervisorUserId: string | undefined,
+  scopeKey = "global",
+  fromIso: string | null | undefined = null,
+  toIso: string | null | undefined = null,
+) {
   return useQuery({
-    queryKey: ["supervisor-manager-scope-performance", supervisorUserId ?? "none", scopeKey],
+    queryKey: [
+      "supervisor-manager-scope-performance",
+      supervisorUserId ?? "none",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+    ],
     queryFn: async () => {
       if (!supervisorUserId) return [];
       const { data, error } = await supabase.rpc("get_supervisor_manager_scope_scorecards", {
         _supervisor_user_id: supervisorUserId,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
       });
       if (error) throw error;
       return (data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[];
@@ -212,11 +235,19 @@ export function useSupervisorManagerOptions(supervisorUserId: string | undefined
       if (!supervisorUserId) return [] as TeamMemberOption[];
       const { data, error } = await supabase.rpc("get_supervisor_manager_scope_scorecards", {
         _supervisor_user_id: supervisorUserId,
+        _from_iso: null,
+        _to_iso: null,
       });
       if (error) throw error;
       const rows = (data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[];
+      const seen = new Set<string>();
       return rows
-        .filter((row) => row.viewer_role === "manager")
+        .filter((row) => {
+          const id = String(row.viewer_user_id || "");
+          if (!id || seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
         .map((row) => ({
           user_id: row.viewer_user_id,
           label: row.manager_name || "Manager",
@@ -308,14 +339,21 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     };
   }
 
-  let customerRows: { id: string; shopify_customer_id: string | null }[] = [];
+  let customerRows: { id: string; shopify_customer_id: string | null; shopify_created_at: string | null; created_at: string | null }[] = [];
   for (const part of splitIntoChunks(customerIds, 200)) {
     const { data, error } = await supabase
       .from("shopify_customers")
-      .select("id, shopify_customer_id")
+      .select("id, shopify_customer_id, shopify_created_at, created_at")
       .in("id", part);
     if (error) throw error;
-    customerRows = customerRows.concat((data ?? []) as { id: string; shopify_customer_id: string | null }[]);
+    customerRows = customerRows.concat(
+      (data ?? []) as {
+        id: string;
+        shopify_customer_id: string | null;
+        shopify_created_at: string | null;
+        created_at: string | null;
+      }[],
+    );
   }
 
   const shopifyCustomerIds = Array.from(
@@ -331,6 +369,12 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     if (toTs !== null && ts > toTs) return false;
     return true;
   };
+  const customersCount = customerRows.reduce((count, row) => {
+    const at = row.shopify_created_at || row.created_at;
+    if (!at) return count;
+    if (!isInRange(at)) return count;
+    return count + 1;
+  }, 0);
 
   const orderMap = new Map<string, { total: number; at: string }>();
   const absorbOrders = (rows: { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]) => {
@@ -401,7 +445,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
 
   return {
     orders_count: ordersCount,
-    customers_count: customerIds.length,
+    customers_count: customersCount,
     revenue,
     avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
     series,
@@ -919,6 +963,30 @@ export function useUnfulfilledOrdersCount() {
       return count ?? 0;
     },
     staleTime: 60_000,
+  });
+}
+
+export function useUnfulfilledOrdersCountInRange(
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["shopify-unfulfilled-orders-count-range", fromIso ?? "none", toIso ?? "none", scopeKey],
+    queryFn: async () => {
+      let q = supabase
+        .from("shopify_orders")
+        .select("id", { count: "exact", head: true })
+        .in("fulfillment_status", ["unfulfilled", "partial", "on_hold"]);
+      if (fromIso) q = q.gte("shopify_created_at", fromIso);
+      if (toIso) q = q.lte("shopify_created_at", toIso);
+      const { count, error } = await q;
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(fromIso && toIso),
   });
 }
 

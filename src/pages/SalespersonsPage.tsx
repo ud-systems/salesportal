@@ -1,5 +1,5 @@
 import { useSalespersonPerformance } from "@/hooks/use-shopify-data";
-import { Users, DollarSign } from "lucide-react";
+import { Users, PoundSterling } from "lucide-react";
 import { useMemo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatOrderMoney } from "@/lib/format";
@@ -120,7 +120,7 @@ export default function SalespersonsPage() {
                     <p className="text-[10px] text-muted-foreground font-body">Orders</p>
                   </div>
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
-                    <DollarSign className="h-4 w-4 text-primary mx-auto mb-1" />
+                    <PoundSterling className="h-4 w-4 text-primary mx-auto mb-1" />
                     <p className="text-lg font-heading font-bold text-foreground">{formatOrderMoney(Number(sp.revenue), null, storeCurrency)}</p>
                     <p className="text-[10px] text-muted-foreground font-body">Revenue</p>
                   </div>

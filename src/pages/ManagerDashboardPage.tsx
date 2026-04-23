@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart, DollarSign, TrendingUp } from "lucide-react";
+import { Users, ShoppingCart, PoundSterling, TrendingUp } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
@@ -252,7 +252,7 @@ export default function ManagerDashboardPage() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Team Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={DollarSign} delay={50} />
+        <KpiCard title="Team Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={PoundSterling} delay={50} />
         <KpiCard title="Team Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_count || 0)} icon={ShoppingCart} delay={100} />
         <KpiCard title="Team Customers" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.customers_count || 0)} icon={Users} delay={150} />
         <KpiCard title="Avg Order" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.avg_order_value || 0, null, currency)} icon={TrendingUp} delay={200} />

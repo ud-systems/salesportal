@@ -1,9 +1,10 @@
-import { DollarSign, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
+import { PoundSterling, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import {
   useRecentOrders,
   useRecentOrdersInRange,
   useUnfulfilledOrdersCount,
+  useUnfulfilledOrdersCountInRange,
   useSalespersonPerformance,
   useScopeOrderMetrics,
   useScopeOrderTimeseries,
@@ -76,7 +77,13 @@ export default function AdminDashboardPage() {
     "admin",
     Boolean(user?.id),
   );
-  const { data: unfulfilledOrders = 0, isLoading: loadingUnfulfilled } = useUnfulfilledOrdersCount();
+  const { data: unfulfilledOrdersAll = 0, isLoading: loadingUnfulfilledAll } = useUnfulfilledOrdersCount();
+  const { data: unfulfilledOrdersRange = 0, isLoading: loadingUnfulfilledRange } = useUnfulfilledOrdersCountInRange(
+    fromIso,
+    toIso,
+    "admin",
+    !isAll,
+  );
   const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(10);
   const { data: recentFiltered = [], isLoading: loadingRecentFiltered } = useRecentOrdersInRange(
     10,
@@ -92,6 +99,8 @@ export default function AdminDashboardPage() {
   const loadingRevenueTotal = isAll ? loadingAllMetrics : loadingRangeMetrics;
   const loadingOrdersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
   const loadingCustomersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const unfulfilledOrders = isAll ? unfulfilledOrdersAll : unfulfilledOrdersRange;
+  const loadingUnfulfilled = isAll ? loadingUnfulfilledAll : loadingUnfulfilledRange;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
   const prevRevenue = compareMetrics?.revenue ?? 0;
   const revDelta =
@@ -109,7 +118,11 @@ export default function AdminDashboardPage() {
   const [dismissedUntilMs, setDismissedUntilMs] = useState(0);
   const [salespersonSearch, setSalespersonSearch] = useState("");
   const [salespersonPage, setSalespersonPage] = useState(1);
-  const { data: salespersonPerformance = [], isLoading: loadingSalespersonPerformance } = useSalespersonPerformance("admin");
+  const { data: salespersonPerformance = [], isLoading: loadingSalespersonPerformance } = useSalespersonPerformance(
+    "admin",
+    isAll ? null : fromIso,
+    isAll ? null : toIso,
+  );
 
   useEffect(() => {
     const loadLicenseSettings = async () => {
@@ -320,7 +333,7 @@ export default function AdminDashboardPage() {
               formatOrderMoney(totalRevenue, null, currency)
             )
           }
-          icon={DollarSign}
+          icon={PoundSterling}
           delay={50}
         />
         <KpiCard

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart, DollarSign, TrendingUp } from "lucide-react";
+import { Users, ShoppingCart, PoundSterling, TrendingUp } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,7 +8,6 @@ import {
   useScopeOrderTimeseries,
   useScopeOrderMetrics,
   useSupervisorSelectedManagerTimeseries,
-  useSupervisorManagerOptions,
   useSupervisorManagerScopePerformance,
 } from "@/hooks/use-shopify-data";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -82,9 +81,21 @@ export default function SupervisorDashboardPage() {
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
 
-  const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, scopeKey);
-  const { data: managerRows = [], isLoading: loadingManagers } = useSupervisorManagerScopePerformance(user?.id, "supervisor");
+  const { data: managerRows = [], isLoading: loadingManagers } = useSupervisorManagerScopePerformance(
+    user?.id,
+    "supervisor",
+    fromIso,
+    toIso,
+  );
   const typedRows = managerRows as ManagerScopeRow[];
+  const managerOptions = useMemo(
+    () =>
+      typedRows.map((row) => ({
+        user_id: row.viewer_user_id,
+        label: row.manager_name || "Manager",
+      })),
+    [typedRows],
+  );
   const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(
     user?.id,
     fromIso,
@@ -102,9 +113,10 @@ export default function SupervisorDashboardPage() {
 
   const selectedViewerIds = useMemo(() => {
     if (scopeMode === "manager_team" && selectedManagerId !== "all") return [selectedManagerId];
+    if (scopeMode === "manager_team" && selectedManagerId === "all") return managerOptions.map((m) => m.user_id);
     if (scopeMode === "mine" && user?.id) return [user.id];
     return [];
-  }, [scopeMode, selectedManagerId, user?.id]);
+  }, [scopeMode, selectedManagerId, user?.id, managerOptions]);
   const { data: aggregatedScopedMetrics, isLoading: loadingAggregatedScopedMetrics } = useAggregateScopeMetricsForViewers(
     selectedViewerIds,
     fromIso,
@@ -122,7 +134,21 @@ export default function SupervisorDashboardPage() {
     scopeMode !== "all",
   );
 
-  const metrics = scopeMode === "all" ? allMetrics : aggregatedScopedMetrics;
+  const scopedMetricsFromSeries = useMemo(() => {
+    if (scopeMode === "all") return null;
+    if (!selectedManagerSeries.length) return null;
+    const revenue = selectedManagerSeries.reduce((sum, point) => sum + Number(point.revenue || 0), 0);
+    const ordersCount = selectedManagerSeries.reduce((sum, point) => sum + Number(point.orders || 0), 0);
+    const customersCount = Number(aggregatedScopedMetrics?.customers_count || 0);
+    return {
+      orders_count: ordersCount,
+      customers_count: customersCount,
+      revenue,
+      avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
+    };
+  }, [scopeMode, selectedManagerSeries, aggregatedScopedMetrics?.customers_count]);
+
+  const metrics = scopeMode === "all" ? allMetrics : scopedMetricsFromSeries ?? aggregatedScopedMetrics;
   const series = scopeMode === "all" ? allSeries : selectedManagerSeries;
   const loadingMetrics = scopeMode === "all" ? loadingAllMetrics : loadingAggregatedScopedMetrics;
   const loadingSeries = scopeMode === "all" ? loadingAllSeries : loadingSelectedSeries;
@@ -241,7 +267,7 @@ export default function SupervisorDashboardPage() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Org Revenue (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={DollarSign} delay={50} />
+        <KpiCard title="Org Revenue (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={PoundSterling} delay={50} />
         <KpiCard title="Org Orders (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_count || 0)} icon={ShoppingCart} delay={100} />
         <KpiCard title="Org Customers (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.customers_count || 0)} icon={Users} delay={150} />
         <KpiCard title="Avg Order" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.avg_order_value || 0, null, currency)} icon={TrendingUp} delay={200} />

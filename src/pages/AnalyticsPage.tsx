@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KpiCard } from "@/components/KpiCard";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DollarSign, ShoppingCart, Users, TrendingUp, FileDown, FileText, LayoutList, Info } from "lucide-react";
+import { PoundSterling, ShoppingCart, Users, TrendingUp, FileDown, FileText, LayoutList, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useScopeOrderTimeseries,
@@ -480,7 +480,7 @@ export default function AnalyticsPage() {
             <KpiCard
               title="Revenue"
               value={loadingMetrics ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(revenue, null, currency)}
-              icon={DollarSign}
+              icon={PoundSterling}
               delay={50}
             />
             <KpiCard

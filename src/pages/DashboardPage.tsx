@@ -1,4 +1,4 @@
-import { DollarSign, ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide-react";
+import { PoundSterling, ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -186,7 +186,7 @@ export default function DashboardPage() {
               formatOrderMoney(totalRevenue, null, currency)
             )
           }
-          icon={DollarSign}
+          icon={PoundSterling}
           delay={50}
         />
         <KpiCard
