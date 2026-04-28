@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import {
   useManagerTeamMemberOptions,
+  useOrderById,
   useOrderItems,
   useOrdersPaginated,
   useSalespeopleUnderManagers,
@@ -29,6 +30,7 @@ export default function OrdersPage() {
   const isLeader = isSupervisor || isManager;
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [searchParams] = useSearchParams();
+  const deepLinkedOrderId = searchParams.get("orderId") || "";
   const initialFulfillment = (() => {
     const val = searchParams.get("fulfillment");
     if (val && ["all", "fulfilled", "partial", "unfulfilled", "on_hold"].includes(val)) return val;
@@ -248,6 +250,7 @@ export default function OrdersPage() {
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const { data: selectedItems } = useOrderItems(selectedOrder?.id);
+  const { data: deepLinkedOrder } = useOrderById(deepLinkedOrderId || undefined);
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -261,6 +264,11 @@ export default function OrdersPage() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  useEffect(() => {
+    if (!deepLinkedOrder) return;
+    setSelectedOrder(deepLinkedOrder);
+  }, [deepLinkedOrder]);
 
   const statuses = ["all", "paid", "pending", "refunded", "partially_paid"];
   const fulfillmentStatuses = ["all", "fulfilled", "partial", "unfulfilled", "on_hold"];

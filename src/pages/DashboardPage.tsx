@@ -41,6 +41,26 @@ export default function DashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
+  const trendLabel = useMemo(() => {
+    switch (preset) {
+      case "all":
+        return "All Time";
+      case "today":
+        return "Today";
+      case "week":
+        return "Last 7 Days";
+      case "month":
+        return "This Month";
+      case "quarter":
+        return "This Quarter";
+      case "year":
+        return "This Year";
+      case "custom":
+        return "Custom Range";
+      default:
+        return "Selected Range";
+    }
+  }, [preset]);
 
   const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(user?.id, null, null, Boolean(user?.id));
   const { data: rangeMetrics, isLoading: loadingRangeMetrics } = useScopeOrderMetrics(
@@ -219,18 +239,18 @@ export default function DashboardPage() {
         {loadingChart ? (
           <>
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
-              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue Trend ({trendLabel})</h3>
               <Skeleton className="h-[220px] w-full rounded-xl" />
             </div>
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
-              <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Orders Trend ({trendLabel})</h3>
               <Skeleton className="h-[220px] w-full rounded-xl" />
             </div>
           </>
         ) : hasChartData ? (
           <>
             <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
-              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue Trend ({trendLabel})</h3>
               <div className="flex-1 min-h-[220px] min-w-0">
                 <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
                   <BarChart
@@ -272,7 +292,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
-              <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Orders Trend ({trendLabel})</h3>
               <div className="flex-1 min-h-[220px]">
                 <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
                   <AreaChart data={chartData} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
@@ -317,11 +337,11 @@ export default function DashboardPage() {
         ) : (
           <>
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
-              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue</h3>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Revenue Trend ({trendLabel})</h3>
               <p className="text-muted-foreground text-sm font-body py-12 text-center">No revenue data in this period.</p>
             </div>
             <div className="card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
-              <h3 className="font-heading font-semibold text-foreground mb-4">Orders trend</h3>
+              <h3 className="font-heading font-semibold text-foreground mb-4">Orders Trend ({trendLabel})</h3>
               <p className="text-muted-foreground text-sm font-body py-12 text-center">No order data in this period.</p>
             </div>
           </>

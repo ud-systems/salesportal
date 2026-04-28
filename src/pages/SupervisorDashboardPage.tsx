@@ -9,6 +9,10 @@ import {
   useScopeOrderMetrics,
   useSupervisorSelectedManagerTimeseries,
   useSupervisorManagerScopePerformance,
+  useSupervisorSalespersonOptions,
+  useSalespeopleScopedMetricsAndSeries,
+  useSalespeopleUnderManagers,
+  useScopedUserOptions,
 } from "@/hooks/use-shopify-data";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { formatOrderMoney } from "@/lib/format";
@@ -35,8 +39,9 @@ export default function SupervisorDashboardPage() {
   const [preset, setPreset] = useState<DatePreset>("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [scopeMode, setScopeMode] = useState<"all" | "manager_team" | "mine">("mine");
+  const [scopeMode, setScopeMode] = useState<"all" | "manager_team" | "salesperson" | "mine">("mine");
   const [selectedManagerId, setSelectedManagerId] = useState("all");
+  const [selectedSalespersonId, setSelectedSalespersonId] = useState("all");
   const [quickManagerFilter, setQuickManagerFilter] = useState<"all" | "top3" | "bottom3">("all");
   const [compareEnabled, setCompareEnabled] = useState(false);
 
@@ -45,8 +50,9 @@ export default function SupervisorDashboardPage() {
       preset: "month" as DatePreset,
       customFrom: "",
       customTo: "",
-      scopeMode: "mine" as "all" | "manager_team" | "mine",
+      scopeMode: "mine" as "all" | "manager_team" | "salesperson" | "mine",
       selectedManagerId: "all",
+      selectedSalespersonId: "all",
       quickManagerFilter: "all" as "all" | "top3" | "bottom3",
       compareEnabled: false,
     });
@@ -55,6 +61,7 @@ export default function SupervisorDashboardPage() {
     setCustomTo(saved.customTo);
     setScopeMode(saved.scopeMode);
     setSelectedManagerId(saved.selectedManagerId);
+    setSelectedSalespersonId(saved.selectedSalespersonId);
     setQuickManagerFilter(saved.quickManagerFilter);
     setCompareEnabled(Boolean(saved.compareEnabled));
   }, [user?.id]);
@@ -66,10 +73,11 @@ export default function SupervisorDashboardPage() {
       customTo,
       scopeMode,
       selectedManagerId,
+      selectedSalespersonId,
       quickManagerFilter,
       compareEnabled,
     });
-  }, [user?.id, preset, customFrom, customTo, scopeMode, selectedManagerId, quickManagerFilter, compareEnabled]);
+  }, [user?.id, preset, customFrom, customTo, scopeMode, selectedManagerId, selectedSalespersonId, quickManagerFilter, compareEnabled]);
 
   const range = useMemo(
     () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
@@ -80,6 +88,24 @@ export default function SupervisorDashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
+  const trendTitle = useMemo(() => {
+    switch (preset) {
+      case "today":
+        return "Today Trend";
+      case "week":
+        return "Last 7 Days Trend";
+      case "month":
+        return "This Month Trend";
+      case "quarter":
+        return "This Quarter Trend";
+      case "year":
+        return "This Year Trend";
+      case "custom":
+        return "Custom Range Trend";
+      default:
+        return "Trend";
+    }
+  }, [preset]);
 
   const { data: managerRows = [], isLoading: loadingManagers } = useSupervisorManagerScopePerformance(
     user?.id,
@@ -95,6 +121,25 @@ export default function SupervisorDashboardPage() {
         label: row.manager_name || "Manager",
       })),
     [typedRows],
+  );
+  const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, scopeKey);
+  const { data: managerSalespeople = [] } = useSalespeopleUnderManagers(
+    selectedManagerId !== "all" ? [selectedManagerId] : [],
+    `${scopeKey}-manager-salespeople`,
+    selectedManagerId !== "all",
+  );
+  const { data: managerSalespersonOptions = [] } = useScopedUserOptions(
+    user?.id,
+    managerSalespeople,
+    `${scopeKey}-manager-salespeople-options`,
+    selectedManagerId !== "all" && managerSalespeople.length > 0,
+  );
+  const filteredSalespersonOptions = useMemo(
+    () =>
+      selectedManagerId === "all"
+        ? salespersonOptions
+        : managerSalespersonOptions,
+    [selectedManagerId, salespersonOptions, managerSalespersonOptions],
   );
   const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(
     user?.id,
@@ -117,12 +162,41 @@ export default function SupervisorDashboardPage() {
     if (scopeMode === "mine" && user?.id) return [user.id];
     return [];
   }, [scopeMode, selectedManagerId, user?.id, managerOptions]);
+  const selectedSalespersonIds = useMemo(() => {
+    if (scopeMode !== "salesperson" && scopeMode !== "manager_team") return [] as string[];
+    if (selectedSalespersonId !== "all") return [selectedSalespersonId];
+    return filteredSalespersonOptions.map((s) => s.user_id);
+  }, [scopeMode, selectedSalespersonId, filteredSalespersonOptions]);
+  const isSalespersonDrilldown = (scopeMode === "salesperson" || scopeMode === "manager_team") && selectedSalespersonId !== "all";
+  const drilledSalespersonId = isSalespersonDrilldown ? selectedSalespersonId : undefined;
   const { data: aggregatedScopedMetrics, isLoading: loadingAggregatedScopedMetrics } = useAggregateScopeMetricsForViewers(
     selectedViewerIds,
     fromIso,
     toIso,
     scopeKey,
     scopeMode !== "all",
+  );
+  const { data: salespersonScopedData, isLoading: loadingSalespersonScopedData } = useSalespeopleScopedMetricsAndSeries(
+    selectedSalespersonIds,
+    fromIso,
+    toIso,
+    bucket,
+    scopeKey,
+    scopeMode === "salesperson" || isSalespersonDrilldown,
+  );
+  const { data: drilledSalespersonMetrics, isLoading: loadingDrilledSalespersonMetrics } = useScopeOrderMetrics(
+    drilledSalespersonId,
+    fromIso,
+    toIso,
+    isSalespersonDrilldown && Boolean(drilledSalespersonId),
+  );
+  const { data: drilledSalespersonSeries = [], isLoading: loadingDrilledSalespersonSeries } = useScopeOrderTimeseries(
+    drilledSalespersonId,
+    fromIso,
+    toIso,
+    bucket,
+    `${scopeKey}-drilled-salesperson`,
+    isSalespersonDrilldown && Boolean(drilledSalespersonId),
   );
   const { data: selectedManagerSeries = [], isLoading: loadingSelectedSeries } = useSupervisorSelectedManagerTimeseries(
     user?.id,
@@ -147,11 +221,38 @@ export default function SupervisorDashboardPage() {
       avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
     };
   }, [scopeMode, selectedManagerSeries, aggregatedScopedMetrics?.customers_count]);
-
-  const metrics = scopeMode === "all" ? allMetrics : scopedMetricsFromSeries ?? aggregatedScopedMetrics;
-  const series = scopeMode === "all" ? allSeries : selectedManagerSeries;
-  const loadingMetrics = scopeMode === "all" ? loadingAllMetrics : loadingAggregatedScopedMetrics;
-  const loadingSeries = scopeMode === "all" ? loadingAllSeries : loadingSelectedSeries;
+  const metrics =
+    scopeMode === "all"
+      ? allMetrics
+      : isSalespersonDrilldown
+        ? drilledSalespersonMetrics
+        : scopeMode === "salesperson"
+        ? salespersonScopedData
+        : scopedMetricsFromSeries ?? aggregatedScopedMetrics;
+  const series =
+    scopeMode === "all"
+      ? allSeries
+      : isSalespersonDrilldown
+        ? drilledSalespersonSeries
+        : scopeMode === "salesperson"
+        ? salespersonScopedData?.series ?? []
+        : selectedManagerSeries;
+  const loadingMetrics =
+    scopeMode === "all"
+      ? loadingAllMetrics
+      : isSalespersonDrilldown
+        ? loadingDrilledSalespersonMetrics
+        : scopeMode === "salesperson"
+        ? loadingSalespersonScopedData
+        : loadingAggregatedScopedMetrics;
+  const loadingSeries =
+    scopeMode === "all"
+      ? loadingAllSeries
+      : isSalespersonDrilldown
+        ? loadingDrilledSalespersonSeries
+        : scopeMode === "salesperson"
+        ? loadingSalespersonScopedData
+        : loadingSelectedSeries;
   const quickScopedIds = useMemo(() => {
     if (quickManagerFilter === "all") return null;
     const ranked = [...typedRows].sort((a, b) => Number(b.team_revenue || 0) - Number(a.team_revenue || 0));
@@ -167,6 +268,11 @@ export default function SupervisorDashboardPage() {
     if (quickScopedIds) rows = rows.filter((row) => quickScopedIds.has(row.viewer_user_id));
     return rows;
   }, [scopeMode, selectedManagerId, typedRows, user?.id, quickScopedIds]);
+  useEffect(() => {
+    if (selectedSalespersonId === "all") return;
+    if (filteredSalespersonOptions.some((s) => s.user_id === selectedSalespersonId)) return;
+    setSelectedSalespersonId("all");
+  }, [filteredSalespersonOptions, selectedSalespersonId]);
 
   return (
     <div className="w-full space-y-6">
@@ -176,7 +282,7 @@ export default function SupervisorDashboardPage() {
       </div>
 
       <div className="card-float p-4 opacity-0 animate-fade-in flex flex-col gap-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Period</p>
             <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
@@ -198,8 +304,9 @@ export default function SupervisorDashboardPage() {
             <Select
               value={scopeMode}
               onValueChange={(v) => {
-                setScopeMode(v as "all" | "manager_team" | "mine");
+                setScopeMode(v as "all" | "manager_team" | "salesperson" | "mine");
                 if (v !== "manager_team") setSelectedManagerId("all");
+                if (v === "all" || v === "mine") setSelectedSalespersonId("all");
               }}
             >
               <SelectTrigger className="rounded-xl h-10 font-body">
@@ -209,6 +316,7 @@ export default function SupervisorDashboardPage() {
                 <SelectItem value="mine">Mine</SelectItem>
                 <SelectItem value="all">My Team</SelectItem>
                 <SelectItem value="manager_team">Manager Team</SelectItem>
+                <SelectItem value="salesperson">Salesperson</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -223,6 +331,26 @@ export default function SupervisorDashboardPage() {
                 {managerOptions.map((m) => (
                   <SelectItem key={m.user_id} value={m.user_id}>
                     {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Salesperson</p>
+            <Select
+              value={selectedSalespersonId}
+              onValueChange={setSelectedSalespersonId}
+              disabled={scopeMode !== "salesperson" && scopeMode !== "manager_team"}
+            >
+              <SelectTrigger className="rounded-xl h-10 font-body">
+                <SelectValue placeholder="Salesperson" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Select salesperson</SelectItem>
+                {filteredSalespersonOptions.map((s) => (
+                  <SelectItem key={s.user_id} value={s.user_id}>
+                    {s.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -274,7 +402,7 @@ export default function SupervisorDashboardPage() {
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
-        <h3 className="font-heading font-semibold text-foreground mb-4">Last 3 Months Trend</h3>
+        <h3 className="font-heading font-semibold text-foreground mb-4">{trendTitle}</h3>
         {loadingSeries ? (
           <Skeleton className="h-[220px] w-full rounded-xl" />
         ) : series.length === 0 ? (
@@ -311,7 +439,9 @@ export default function SupervisorDashboardPage() {
 
       <div className="card-float p-5 opacity-0 animate-fade-in">
         <h3 className="font-heading font-semibold text-foreground mb-4">Manager Scorecards</h3>
-        {loadingManagers ? (
+        {scopeMode === "salesperson" ? (
+          <p className="text-sm text-muted-foreground font-body">Manager scorecards are hidden in salesperson scope.</p>
+        ) : loadingManagers ? (
           <div className="space-y-2">
             <Skeleton className="h-9 w-full rounded-lg" />
             <Skeleton className="h-9 w-full rounded-lg" />

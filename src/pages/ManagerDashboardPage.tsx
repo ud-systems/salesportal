@@ -71,9 +71,33 @@ export default function ManagerDashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
+  const trendTitle = useMemo(() => {
+    switch (preset) {
+      case "today":
+        return "Today Trend";
+      case "week":
+        return "Last 7 Days Trend";
+      case "month":
+        return "This Month Trend";
+      case "quarter":
+        return "This Quarter Trend";
+      case "year":
+        return "This Year Trend";
+      case "custom":
+        return "Custom Range Trend";
+      default:
+        return "Trend";
+    }
+  }, [preset]);
 
   const { data: teamMemberOptions = [] } = useManagerTeamMemberOptions(user?.id, scopeKey);
-  const { data: teamRows = [], isLoading: loadingTeam } = useDirectReportSalesPerformance(user?.id, "manager", "manager");
+  const { data: teamRows = [], isLoading: loadingTeam } = useDirectReportSalesPerformance(
+    user?.id,
+    "manager",
+    "manager",
+    fromIso,
+    toIso,
+  );
   const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(
     user?.id,
     fromIso,
@@ -129,7 +153,7 @@ export default function ManagerDashboardPage() {
   }, [scopeMode, selectedSeries, scopedData?.customers_count]);
 
   const metrics = scopeMode === "team" ? allMetrics : scopedMetricsFromSeries ?? scopedData;
-  const series = scopeMode === "team" ? allSeries : selectedSeries;
+  const series = scopeMode === "team" ? allSeries : (selectedSeries.length ? selectedSeries : scopedData?.series ?? []);
   const loadingMetrics = scopeMode === "team" ? loadingAllMetrics : loadingScopedData || loadingSelectedSeries;
   const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
   const quickScopedIds = useMemo(() => {
@@ -259,7 +283,7 @@ export default function ManagerDashboardPage() {
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
-        <h3 className="font-heading font-semibold text-foreground mb-4">Last 3 Months Trend</h3>
+        <h3 className="font-heading font-semibold text-foreground mb-4">{trendTitle}</h3>
         {loadingSeries ? (
           <Skeleton className="h-[220px] w-full rounded-xl" />
         ) : series.length === 0 ? (

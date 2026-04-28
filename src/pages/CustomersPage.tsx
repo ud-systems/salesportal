@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import {
+  useCustomerRecentOrders,
   useCustomerCities,
   useCustomersPaginated,
+  useOrderItems,
   useSalespeopleUnderManagers,
   useSupervisorManagerOptions,
   useSupervisorSalespersonOptions,
@@ -20,14 +22,19 @@ import { Pagination, PaginationContent, PaginationItem, PaginationLink, Paginati
 import { Skeleton } from "@/components/ui/skeleton";
 import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { formatOrderMoney } from "@/lib/format";
+import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useNavigate } from "react-router-dom";
 
 export default function CustomersPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const { user, isAdmin, isSupervisor } = useAuth();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [assignmentFilter, setAssignmentFilter] = useState("all");
@@ -47,6 +54,8 @@ export default function CustomersPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showAllNoteFields, setShowAllNoteFields] = useState(false);
   const [showRawNote, setShowRawNote] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<"overview" | "orders">("overview");
+  const [expandedOrderId, setExpandedOrderId] = useState("");
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
   const fromIso = toRangeIso(range.from);
@@ -196,6 +205,13 @@ export default function CustomersPage() {
   const isCustomersLoading = isLoading || !isScopeCustomersReady;
   const customers = data?.data ?? [];
   const isRefreshing = isFetching && !isCustomersLoading;
+  const { data: recentOrders = [], isLoading: loadingRecentOrders } = useCustomerRecentOrders(
+    selectedCustomer?.id,
+    selectedCustomer?.shopify_customer_id,
+    12,
+    Boolean(selectedCustomer),
+  );
+  const { data: expandedOrderItems = [], isLoading: loadingExpandedOrderItems } = useOrderItems(expandedOrderId || undefined);
   const customersVisible = useMemo(() => {
     if (quickRankFilter === "all") return customers;
     const ranked = [...customers].sort((a, b) => Number(b.total_revenue || 0) - Number(a.total_revenue || 0));
@@ -211,6 +227,11 @@ export default function CustomersPage() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  useEffect(() => {
+    setDetailsTab("overview");
+    setExpandedOrderId("");
+  }, [selectedCustomer?.id]);
 
   const parseCustomerNoteFields = (note: string | null | undefined) => {
     if (!note) return [] as Array<{ label: string; value: string }>;
@@ -579,6 +600,8 @@ export default function CustomersPage() {
             setSelectedCustomer(null);
             setShowAllNoteFields(false);
             setShowRawNote(false);
+            setDetailsTab("overview");
+            setExpandedOrderId("");
           }
         }}
       >
@@ -588,81 +611,178 @@ export default function CustomersPage() {
           </SheetHeader>
           {selectedCustomer && (
             <div className="space-y-4 mt-4 font-body text-sm">
-              {(() => {
-                const noteFields = parseCustomerNoteFields(selectedCustomer.customer_note);
-                const visibleNoteFields = showAllNoteFields ? noteFields : noteFields.slice(0, 8);
-                return (
-                  <>
-              <div className="rounded-xl border bg-card p-4">
-                <p className="text-lg font-semibold text-foreground">{selectedCustomer.name}</p>
-                <p className="text-muted-foreground">{selectedCustomer.email || "No email"} · {selectedCustomer.phone || "No phone"}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Orders</p><p className="font-semibold">{selectedCustomer.total_orders || 0}</p></div>
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-semibold">{formatOrderMoney(Number(selectedCustomer.total_revenue || 0), selectedCustomer.spend_currency, storeCurrency)}</p></div>
-              </div>
-              <div className="rounded-xl border p-4 space-y-3">
-                <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Profile</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div><p className="text-xs text-muted-foreground">Store</p><p className="text-foreground break-words">{selectedCustomer.store_name || "—"}</p></div>
-                  <div><p className="text-xs text-muted-foreground">City</p><p className="text-foreground break-words">{selectedCustomer.city || "—"}</p></div>
-                  <div className="sm:col-span-2"><p className="text-xs text-muted-foreground">Address</p><p className="text-foreground break-words">{[selectedCustomer.address1, selectedCustomer.address2, selectedCustomer.province, selectedCustomer.country, selectedCustomer.zip].filter(Boolean).join(", ") || "—"}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Salesperson</p><p className="text-foreground break-words">{selectedCustomer.sp_assigned || "Unassigned"}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Referred by</p><p className="text-foreground break-words">{selectedCustomer.referred_by || "—"}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Account state</p><p className="text-foreground break-words">{selectedCustomer.account_state || "—"}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Locale</p><p className="text-foreground break-words">{selectedCustomer.locale || "—"}</p></div>
-                </div>
-              </div>
-              <div className="rounded-xl border p-4 space-y-3">
-                <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Additional details</p>
-                {noteFields.length > 0 ? (
-                  <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {visibleNoteFields.map((field) => (
-                        <div key={`${field.label}-${field.value.slice(0, 30)}`} className="rounded-lg border bg-muted/20 px-3 py-2">
-                          <p className="text-xs text-muted-foreground">{field.label}</p>
-                          <p className="text-foreground break-words">{field.value}</p>
+              <Tabs value={detailsTab} onValueChange={(value) => setDetailsTab(value as "overview" | "orders")} className="w-full">
+                <TabsList className="w-full grid grid-cols-2 rounded-xl">
+                  <TabsTrigger value="overview" className="rounded-lg">Overview</TabsTrigger>
+                  <TabsTrigger value="orders" className="rounded-lg">Recent Orders</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="overview" className="space-y-4">
+                  {(() => {
+                    const noteFields = parseCustomerNoteFields(selectedCustomer.customer_note);
+                    const visibleNoteFields = showAllNoteFields ? noteFields : noteFields.slice(0, 8);
+                    return (
+                      <>
+                        <div className="rounded-xl border bg-card p-4">
+                          <p className="text-lg font-semibold text-foreground">{selectedCustomer.name}</p>
+                          <p className="text-muted-foreground">{selectedCustomer.email || "No email"} · {selectedCustomer.phone || "No phone"}</p>
                         </div>
-                      ))}
-                    </div>
-                    {noteFields.length > 8 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAllNoteFields((prev) => !prev)}
-                        className="text-xs text-primary hover:underline"
-                      >
-                        {showAllNoteFields ? "Show fewer fields" : `Show all fields (${noteFields.length})`}
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-muted-foreground whitespace-pre-wrap break-words">{selectedCustomer.customer_note || "—"}</p>
-                )}
-                {selectedCustomer.customer_note && (
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setShowRawNote((prev) => !prev)}
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      {showRawNote ? "Hide raw note" : "View raw note"}
-                    </button>
-                    {showRawNote && (
-                      <pre className="mt-2 max-h-56 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs whitespace-pre-wrap break-words">
-                        {selectedCustomer.customer_note}
-                      </pre>
-                    )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Orders</p><p className="font-semibold">{selectedCustomer.total_orders || 0}</p></div>
+                          <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Revenue</p><p className="font-semibold">{formatOrderMoney(Number(selectedCustomer.total_revenue || 0), selectedCustomer.spend_currency, storeCurrency)}</p></div>
+                        </div>
+                        <div className="rounded-xl border p-4 space-y-3">
+                          <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Profile</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div><p className="text-xs text-muted-foreground">Store</p><p className="text-foreground break-words">{selectedCustomer.store_name || "—"}</p></div>
+                            <div><p className="text-xs text-muted-foreground">City</p><p className="text-foreground break-words">{selectedCustomer.city || "—"}</p></div>
+                            <div className="sm:col-span-2"><p className="text-xs text-muted-foreground">Address</p><p className="text-foreground break-words">{[selectedCustomer.address1, selectedCustomer.address2, selectedCustomer.province, selectedCustomer.country, selectedCustomer.zip].filter(Boolean).join(", ") || "—"}</p></div>
+                            <div><p className="text-xs text-muted-foreground">Salesperson</p><p className="text-foreground break-words">{selectedCustomer.sp_assigned || "Unassigned"}</p></div>
+                            <div><p className="text-xs text-muted-foreground">Referred by</p><p className="text-foreground break-words">{selectedCustomer.referred_by || "—"}</p></div>
+                            <div><p className="text-xs text-muted-foreground">Account state</p><p className="text-foreground break-words">{selectedCustomer.account_state || "—"}</p></div>
+                            <div><p className="text-xs text-muted-foreground">Locale</p><p className="text-foreground break-words">{selectedCustomer.locale || "—"}</p></div>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border p-4 space-y-3">
+                          <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Additional details</p>
+                          {noteFields.length > 0 ? (
+                            <>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {visibleNoteFields.map((field) => (
+                                  <div key={`${field.label}-${field.value.slice(0, 30)}`} className="rounded-lg border bg-muted/20 px-3 py-2">
+                                    <p className="text-xs text-muted-foreground">{field.label}</p>
+                                    <p className="text-foreground break-words">{field.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                              {noteFields.length > 8 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAllNoteFields((prev) => !prev)}
+                                  className="text-xs text-primary hover:underline"
+                                >
+                                  {showAllNoteFields ? "Show fewer fields" : `Show all fields (${noteFields.length})`}
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-muted-foreground whitespace-pre-wrap break-words">{selectedCustomer.customer_note || "—"}</p>
+                          )}
+                          {selectedCustomer.customer_note && (
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setShowRawNote((prev) => !prev)}
+                                className="text-xs text-muted-foreground hover:text-foreground"
+                              >
+                                {showRawNote ? "Hide raw note" : "View raw note"}
+                              </button>
+                              {showRawNote && (
+                                <pre className="mt-2 max-h-56 overflow-auto rounded-lg border bg-muted/20 p-3 text-xs whitespace-pre-wrap break-words">
+                                  {selectedCustomer.customer_note}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </TabsContent>
+
+                <TabsContent value="orders" className="space-y-3">
+                  <div className="rounded-xl border p-3 flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">Showing up to 12 recent orders for this customer.</p>
                   </div>
-                )}
-              </div>
+                  {loadingRecentOrders ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                    </div>
+                  ) : recentOrders.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-8 text-center">No recent orders found for this customer.</p>
+                  ) : (
+                    <Accordion
+                      type="single"
+                      collapsible
+                      value={expandedOrderId}
+                      onValueChange={(value) => setExpandedOrderId(value)}
+                      className="rounded-xl border px-4"
+                    >
+                      {recentOrders.map((order) => (
+                        <AccordionItem key={order.id} value={order.id}>
+                          <AccordionTrigger className="py-3 hover:no-underline">
+                            <div className="flex-1 text-left">
+                              <p className="font-medium text-foreground">{order.order_number || order.shopify_order_id}</p>
+                              <p className="text-xs text-muted-foreground">{formatDisplayDate(order.shopify_created_at || order.created_at)}</p>
+                            </div>
+                            <div className="mr-3 text-right">
+                              <p className="font-semibold text-foreground">{formatOrderMoney(Number(order.total || 0), order.currency_code, storeCurrency)}</p>
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap gap-2">
+                                <StatusBadge status={(order.financial_status || "pending") as any} />
+                                <StatusBadge status={(order.fulfillment_status || "unfulfilled") as any} />
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div><p className="text-muted-foreground">Processed</p><p className="text-foreground">{formatDisplayDateTime(order.processed_at)}</p></div>
+                                <div><p className="text-muted-foreground">Customer</p><p className="text-foreground">{order.customer_name || "—"}</p></div>
+                                <div><p className="text-muted-foreground">Subtotal</p><p className="text-foreground">{formatOrderMoney(Number(order.subtotal || 0), order.currency_code, storeCurrency)}</p></div>
+                                <div><p className="text-muted-foreground">Tax</p><p className="text-foreground">{formatOrderMoney(Number(order.total_tax || 0), order.currency_code, storeCurrency)}</p></div>
+                              </div>
+                              <div className="rounded-lg border p-3">
+                                <p className="text-xs font-medium text-foreground mb-2">Line items</p>
+                                {expandedOrderId === order.id && loadingExpandedOrderItems ? (
+                                  <Skeleton className="h-10 w-full rounded-lg" />
+                                ) : expandedOrderId === order.id && expandedOrderItems.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {expandedOrderItems.map((item: any) => (
+                                      <div key={item.id} className="flex items-center justify-between text-xs">
+                                        <div className="pr-2">
+                                          <p className="text-foreground">{item.product || "Item"}</p>
+                                          <p className="text-muted-foreground">{item.variant || "Default"} {item.sku ? `· SKU ${item.sku}` : ""}</p>
+                                        </div>
+                                        <div className="text-right">
+                                          <p className="text-foreground">x{item.quantity || 0}</p>
+                                          <p className="text-muted-foreground">{formatOrderMoney(Number(item.price || 0), order.currency_code, storeCurrency)}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">No line items found.</p>
+                                )}
+                              </div>
+                              <div className="flex justify-end">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-xl"
+                                  onClick={() => {
+                                    setSelectedCustomer(null);
+                                    navigate(`/orders?orderId=${order.id}`);
+                                  }}
+                                >
+                                  Open full order
+                                </Button>
+                              </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      ))}
+                    </Accordion>
+                  )}
+                </TabsContent>
+              </Tabs>
+
               <div className="flex justify-end">
                 <SheetClose asChild>
                   <Button variant="outline" className="rounded-xl">Close</Button>
                 </SheetClose>
               </div>
-                  </>
-                );
-              })()}
             </div>
           )}
         </SheetContent>

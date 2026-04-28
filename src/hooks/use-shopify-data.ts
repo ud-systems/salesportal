@@ -38,6 +38,27 @@ export type TeamMemberOption = {
   label: string;
 };
 
+export type RecentCustomerOrder = {
+  id: string;
+  order_number: string | null;
+  shopify_order_id: string;
+  customer_id: string | null;
+  shopify_customer_id: string | null;
+  customer_name: string | null;
+  email: string | null;
+  total: number | null;
+  subtotal: number | null;
+  total_tax: number | null;
+  currency_code: string | null;
+  financial_status: string | null;
+  fulfillment_status: string | null;
+  processed_at: string | null;
+  shopify_created_at: string | null;
+  created_at: string | null;
+  tags: string | null;
+  order_note: string | null;
+};
+
 async function fetchAllScopedCustomerIdsForViewer(
   viewerUserId: string,
   salespersonUserIds: string[],
@@ -213,15 +234,34 @@ export function useManagerTeamMemberOptions(managerUserId: string | undefined, s
     queryKey: ["manager-team-member-options", managerUserId ?? "none", scopeKey],
     queryFn: async () => {
       if (!managerUserId) return [] as TeamMemberOption[];
-      const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
-        _leader_user_id: managerUserId,
-        _leader_role: "manager",
+      const { data: edges, error: edgesError } = await supabase
+        .from("sales_hierarchy_edges")
+        .select("member_user_id")
+        .eq("leader_user_id", managerUserId)
+        .eq("leader_role", "manager");
+      if (edgesError) throw edgesError;
+
+      const memberIds = Array.from(
+        new Set(
+          ((edges ?? []) as { member_user_id: string }[])
+            .map((row) => row.member_user_id)
+            .filter(Boolean),
+        ),
+      );
+      if (!memberIds.length) return [] as TeamMemberOption[];
+
+      const { data, error } = await (supabase as any).rpc("get_scoped_user_display_names", {
+        _viewer_user_id: managerUserId,
+        _target_user_ids: memberIds,
       });
       if (error) throw error;
-      return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
-        user_id: row.salesperson_user_id,
-        label: row.salesperson_name || "Salesperson",
-      }));
+      return ((data ?? []) as { user_id?: string | null; display_name?: string | null }[])
+        .map((row) => ({
+          user_id: String(row.user_id ?? ""),
+          label: String(row.display_name ?? "").trim() || "Salesperson",
+        }))
+        .filter((row) => row.user_id)
+        .sort((a, b) => a.label.localeCompare(b.label));
     },
     staleTime: 60_000,
     enabled: Boolean(managerUserId),
@@ -275,6 +315,34 @@ export function useSupervisorSalespersonOptions(supervisorUserId: string | undef
     },
     staleTime: 60_000,
     enabled: Boolean(supervisorUserId),
+  });
+}
+
+export function useScopedUserOptions(
+  viewerUserId: string | undefined,
+  targetUserIds: string[],
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["scoped-user-options", scopeKey, viewerUserId ?? "none", [...targetUserIds].sort().join(",")],
+    queryFn: async () => {
+      if (!viewerUserId || !targetUserIds.length) return [] as TeamMemberOption[];
+      const { data, error } = await (supabase as any).rpc("get_scoped_user_display_names", {
+        _viewer_user_id: viewerUserId,
+        _target_user_ids: targetUserIds,
+      });
+      if (error) throw error;
+      return ((data ?? []) as { user_id?: string | null; display_name?: string | null }[])
+        .map((row) => ({
+          user_id: String(row.user_id ?? ""),
+          label: String(row.display_name ?? "").trim() || "Salesperson",
+        }))
+        .filter((row) => row.user_id)
+        .sort((a, b) => a.label.localeCompare(b.label));
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId) && targetUserIds.length > 0,
   });
 }
 
@@ -1597,6 +1665,57 @@ export function useOrderItems(orderId?: string) {
       return data;
     },
     enabled: !!orderId,
+  });
+}
+
+export function useOrderById(orderId?: string) {
+  return useQuery({
+    queryKey: ["shopify-order-by-id", orderId ?? "none"],
+    queryFn: async () => {
+      if (!orderId) return null;
+      const { data, error } = await supabase
+        .from("shopify_orders")
+        .select("*")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: Boolean(orderId),
+    staleTime: 60_000,
+  });
+}
+
+export function useCustomerRecentOrders(
+  customerId?: string,
+  shopifyCustomerId?: string,
+  limit = 12,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["customer-recent-orders", customerId ?? "none", shopifyCustomerId ?? "none", limit],
+    queryFn: async () => {
+      if (!customerId && !shopifyCustomerId) return [] as RecentCustomerOrder[];
+      let query = supabase
+        .from("shopify_orders")
+        .select(
+          "id, order_number, shopify_order_id, customer_id, shopify_customer_id, customer_name, email, total, subtotal, total_tax, currency_code, financial_status, fulfillment_status, processed_at, shopify_created_at, created_at, tags, order_note",
+        )
+        .order("shopify_created_at", { ascending: false, nullsFirst: false })
+        .limit(limit);
+      if (customerId && shopifyCustomerId) {
+        query = query.or(`customer_id.eq.${customerId},shopify_customer_id.eq.${shopifyCustomerId}`);
+      } else if (customerId) {
+        query = query.eq("customer_id", customerId);
+      } else if (shopifyCustomerId) {
+        query = query.eq("shopify_customer_id", shopifyCustomerId);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data ?? []) as RecentCustomerOrder[];
+    },
+    enabled: enabled && Boolean(customerId || shopifyCustomerId),
+    staleTime: 60_000,
   });
 }
 

@@ -54,6 +54,26 @@ export default function AdminDashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
+  const trendTitle = useMemo(() => {
+    switch (preset) {
+      case "all":
+        return "All Time Revenue Trend";
+      case "today":
+        return "Today Revenue Trend";
+      case "week":
+        return "Last 7 Days Revenue Trend";
+      case "month":
+        return "This Month Revenue Trend";
+      case "quarter":
+        return "This Quarter Revenue Trend";
+      case "year":
+        return "This Year Revenue Trend";
+      case "custom":
+        return "Custom Range Revenue Trend";
+      default:
+        return "Revenue Trend";
+    }
+  }, [preset]);
 
   const { user } = useAuth();
   const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(user?.id, null, null, Boolean(user?.id));
@@ -361,7 +381,7 @@ export default function AdminDashboardPage() {
       <div className={`grid grid-cols-1 items-stretch gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
         <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <h3 className="font-heading font-semibold text-foreground mb-4">
-            {isAll ? "Revenue by Month" : "Revenue (selected period)"}
+            {trendTitle}
           </h3>
           {loadingBar ? (
             <Skeleton className="h-[220px] w-full rounded-xl" />
