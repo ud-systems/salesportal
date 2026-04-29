@@ -395,10 +395,10 @@ export default function SupervisorDashboardPage() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Org Revenue (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={PoundSterling} delay={50} />
-        <KpiCard title="Org Orders (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_count || 0)} icon={ShoppingCart} delay={100} />
-        <KpiCard title="Org Customers (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.customers_count || 0)} icon={Users} delay={150} />
-        <KpiCard title="Avg Order" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.avg_order_value || 0, null, currency)} icon={TrendingUp} delay={200} />
+        <KpiCard title="Org Revenue (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={PoundSterling} info="Current scope revenue from order totals for selected period." delay={50} />
+        <KpiCard title="Org Orders (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_count || 0)} icon={ShoppingCart} info="Current scope order count for selected period." delay={100} />
+        <KpiCard title="Org Customers (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.customers_count || 0)} icon={Users} info="Current scope customer count for selected period." delay={150} />
+        <KpiCard title="Avg Order" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.avg_order_value || 0, null, currency)} icon={TrendingUp} info="Revenue divided by order count for the selected scope." delay={200} />
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">

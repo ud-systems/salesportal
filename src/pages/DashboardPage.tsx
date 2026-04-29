@@ -5,7 +5,7 @@ import {
   useRecentOrders,
   useRecentOrdersInRange,
   useScopeOrderTimeseries,
-  useScopeOrderMetrics,
+  useScopeFinancialBreakdown,
   useTopCustomers,
 } from "@/hooks/use-shopify-data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -62,15 +62,15 @@ export default function DashboardPage() {
     }
   }, [preset]);
 
-  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(user?.id, null, null, Boolean(user?.id));
-  const { data: rangeMetrics, isLoading: loadingRangeMetrics } = useScopeOrderMetrics(
+  const { data: allBreakdown, isLoading: loadingAllBreakdown } = useScopeFinancialBreakdown(user?.id, null, null, Boolean(user?.id));
+  const { data: rangeBreakdown, isLoading: loadingRangeBreakdown } = useScopeFinancialBreakdown(
     user?.id,
     fromIso,
     toIso,
     !isAll && Boolean(user?.id),
   );
   const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(5, scopeKey);
-  const { data: metricsCompare } = useScopeOrderMetrics(
+  const { data: metricsCompare } = useScopeFinancialBreakdown(
     user?.id,
     cmpFromIso,
     cmpToIso,
@@ -94,17 +94,17 @@ export default function DashboardPage() {
 
   const { data: topCustomers = [], isLoading: loadingTopCustomers } = useTopCustomers(3, scopeKey);
 
-  const totalRevenue = isAll ? (allMetrics?.revenue ?? 0) : (rangeMetrics?.revenue ?? 0);
-  const totalOrders = isAll ? (allMetrics?.orders_count ?? 0) : (rangeMetrics?.orders_count ?? 0);
-  const totalCustomers = isAll ? (allMetrics?.customers_count ?? 0) : (rangeMetrics?.customers_count ?? 0);
+  const grossRevenue = isAll ? (allBreakdown?.gross_revenue ?? 0) : (rangeBreakdown?.gross_revenue ?? 0);
+  const netRevenue = isAll ? (allBreakdown?.net_revenue ?? 0) : (rangeBreakdown?.net_revenue ?? 0);
+  const refundedAmount = isAll ? (allBreakdown?.refunded_amount ?? 0) : (rangeBreakdown?.refunded_amount ?? 0);
+  const totalOrders = isAll ? (allBreakdown?.orders_total_count ?? 0) : (rangeBreakdown?.orders_total_count ?? 0);
+  const totalCustomers = isAll ? (allBreakdown?.customers_count ?? 0) : (rangeBreakdown?.customers_count ?? 0);
   const recentOrders = isAll ? recentOrdersAll : recentFiltered;
 
-  const loadingRevenueTotal = isAll ? loadingAllMetrics : loadingRangeMetrics;
-  const loadingOrdersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
-  const loadingCustomersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const loadingRevenueTotal = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
+  const loadingOrdersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
+  const loadingCustomersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
-
-  const avgOrderValue = isAll ? (allMetrics?.avg_order_value ?? 0) : (rangeMetrics?.avg_order_value ?? 0);
 
   const chartData = useMemo(
     () => chartSeries.map((p) => ({ label: p.label, revenue: p.revenue, orders: p.orders })),
@@ -117,9 +117,9 @@ export default function DashboardPage() {
 
   const loadingChart = loadingSeries;
 
-  const prevRevenue = metricsCompare?.revenue ?? 0;
+  const prevRevenue = metricsCompare?.gross_revenue ?? 0;
   const revDelta =
-    !isAll && prevRevenue > 0 ? (((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
+    !isAll && prevRevenue > 0 ? (((grossRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
 
   const firstName = user?.name?.split(" ")[0] || "there";
 
@@ -198,39 +198,56 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <KpiCard
-          title="Total Revenue"
+          title="Gross Revenue"
           value={
             loadingRevenueTotal ? (
               <Skeleton className="h-8 w-24 rounded-md" />
             ) : (
-              formatOrderMoney(totalRevenue, null, currency)
+              formatOrderMoney(grossRevenue, null, currency)
             )
           }
           icon={PoundSterling}
+          info="Sum of all non-test order totals in your scope and selected period."
           delay={50}
+        />
+        <KpiCard
+          title="Net Revenue"
+          value={
+            loadingRevenueTotal ? (
+              <Skeleton className="h-8 w-24 rounded-md" />
+            ) : (
+              formatOrderMoney(netRevenue, null, currency)
+            )
+          }
+          icon={PoundSterling}
+          info="Gross revenue minus refunded/partially_refunded/voided order totals."
+          delay={75}
         />
         <KpiCard
           title="Orders"
           value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
           icon={ShoppingCart}
+          info="Count of all non-test orders in your scope and selected period."
           delay={100}
         />
         <KpiCard
           title="Customers"
           value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
           icon={Users}
+          info="Customers in your scope, filtered by customer created date for the selected period."
           delay={150}
         />
         <KpiCard
-          title="Avg. Order"
+          title="Refunded Amount"
           value={
             loadingRevenueTotal || loadingOrdersCount ? (
               <Skeleton className="h-8 w-20 rounded-md" />
             ) : (
-              formatOrderMoney(avgOrderValue, null, currency)
+              formatOrderMoney(refundedAmount, null, currency)
             )
           }
           icon={TrendingUp}
+          info="Total value of orders marked refunded, partially_refunded, or voided."
           delay={200}
         />
       </div>

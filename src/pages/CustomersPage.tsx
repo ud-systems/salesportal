@@ -24,7 +24,7 @@ import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
-import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toLocalYmd, type DatePreset } from "@/lib/dashboard-date-range";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -58,8 +58,8 @@ export default function CustomersPage() {
   const [expandedOrderId, setExpandedOrderId] = useState("");
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
-  const fromIso = toRangeIso(range.from);
-  const toIso = toRangeIso(range.to);
+  const fromYmd = toLocalYmd(range.from);
+  const toYmd = toLocalYmd(range.to);
   const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, "customers-page");
   const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, "customers-page");
   const { data: managerSalespeople = [] } = useSalespeopleUnderManagers(
@@ -193,8 +193,8 @@ export default function CustomersPage() {
     search,
     cityFilter,
     assignmentFilter: assignmentFilter as "all" | "assigned" | "unassigned",
-    fromDate: fromIso ? fromIso.slice(0, 10) : "",
-    toDate: toIso ? toIso.slice(0, 10) : "",
+    fromDate: fromYmd,
+    toDate: toYmd,
     sortBy,
     sortDir,
     scopeSalespersonIds: shouldApplyExplicitScopeFilters ? scopedSalespersonIds : undefined,
@@ -271,7 +271,7 @@ export default function CustomersPage() {
         </div>
         <button onClick={() => setFilterOpen(true)} className="h-10 px-4 rounded-xl border bg-card font-body text-sm text-muted-foreground hover:bg-muted transition-colors tap-scale lg:hidden">Filter</button>
       </div>
-      <div className="hidden lg:grid grid-cols-1 md:grid-cols-5 gap-2">
+      <div className={`hidden lg:grid grid-cols-1 gap-2 ${preset === "custom" ? "md:grid-cols-5" : "md:grid-cols-3"}`}>
         <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
           <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
             <SelectValue placeholder="Period" />
@@ -286,8 +286,12 @@ export default function CustomersPage() {
             <SelectItem value="custom">Custom</SelectItem>
           </SelectContent>
         </Select>
-        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
-        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
+        {preset === "custom" && (
+          <>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
+          </>
+        )}
         <Select value={sortBy} onValueChange={(value: "total_revenue" | "total_orders" | "shopify_created_at" | "name") => setSortBy(value)}>
           <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
             <SelectValue placeholder="Sort by" />
@@ -399,11 +403,30 @@ export default function CustomersPage() {
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Customers" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
         <div className="space-y-3">
-          <p className="text-sm font-medium font-body text-foreground">Date range</p>
-          <div className="grid grid-cols-1 gap-2">
-            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
-            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
-          </div>
+          <p className="text-sm font-medium font-body text-foreground">Period</p>
+          <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Period" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">Last 7 days</SelectItem>
+              <SelectItem value="month">This month</SelectItem>
+              <SelectItem value="quarter">This quarter</SelectItem>
+              <SelectItem value="year">This year</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+          {preset === "custom" && (
+            <>
+              <p className="text-sm font-medium font-body text-foreground">Date range</p>
+              <div className="grid grid-cols-1 gap-2">
+                <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
+                <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
+              </div>
+            </>
+          )}
           <p className="text-sm font-medium font-body text-foreground pt-1">Sort</p>
           <div className="grid grid-cols-1 gap-2">
             <Select value={sortBy} onValueChange={(value: "total_revenue" | "total_orders" | "shopify_created_at" | "name") => setSortBy(value)}>

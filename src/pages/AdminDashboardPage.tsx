@@ -5,8 +5,8 @@ import {
   useRecentOrdersInRange,
   useUnfulfilledOrdersCount,
   useUnfulfilledOrdersCountInRange,
-  useSalespersonPerformance,
-  useScopeOrderMetrics,
+  useSalespersonFinancialBreakdown,
+  useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -76,14 +76,14 @@ export default function AdminDashboardPage() {
   }, [preset]);
 
   const { user } = useAuth();
-  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(user?.id, null, null, Boolean(user?.id));
-  const { data: rangeMetrics, isLoading: loadingRangeMetrics } = useScopeOrderMetrics(
+  const { data: allBreakdown, isLoading: loadingAllBreakdown } = useScopeFinancialBreakdown(user?.id, null, null, Boolean(user?.id));
+  const { data: rangeBreakdown, isLoading: loadingRangeBreakdown } = useScopeFinancialBreakdown(
     user?.id,
     fromIso,
     toIso,
     !isAll && Boolean(user?.id),
   );
-  const { data: compareMetrics } = useScopeOrderMetrics(
+  const { data: compareBreakdown } = useScopeFinancialBreakdown(
     user?.id,
     cmpFromIso,
     cmpToIso,
@@ -112,19 +112,23 @@ export default function AdminDashboardPage() {
     "admin",
     !isAll,
   );
-  const totalRevenue = isAll ? (allMetrics?.revenue ?? 0) : (rangeMetrics?.revenue ?? 0);
-  const totalOrders = isAll ? (allMetrics?.orders_count ?? 0) : (rangeMetrics?.orders_count ?? 0);
-  const totalCustomers = isAll ? (allMetrics?.customers_count ?? 0) : (rangeMetrics?.customers_count ?? 0);
+  const grossRevenue = isAll ? (allBreakdown?.gross_revenue ?? 0) : (rangeBreakdown?.gross_revenue ?? 0);
+  const refundedAmount = isAll ? (allBreakdown?.refunded_amount ?? 0) : (rangeBreakdown?.refunded_amount ?? 0);
+  const netRevenue = isAll ? (allBreakdown?.net_revenue ?? 0) : (rangeBreakdown?.net_revenue ?? 0);
+  const totalOrders = isAll ? (allBreakdown?.orders_total_count ?? 0) : (rangeBreakdown?.orders_total_count ?? 0);
+  const paidOrders = isAll ? (allBreakdown?.orders_paid_count ?? 0) : (rangeBreakdown?.orders_paid_count ?? 0);
+  const refundedOrders = isAll ? (allBreakdown?.orders_refunded_count ?? 0) : (rangeBreakdown?.orders_refunded_count ?? 0);
+  const totalCustomers = isAll ? (allBreakdown?.customers_count ?? 0) : (rangeBreakdown?.customers_count ?? 0);
   const recentOrders = isAll ? recentOrdersAll : recentFiltered;
-  const loadingRevenueTotal = isAll ? loadingAllMetrics : loadingRangeMetrics;
-  const loadingOrdersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
-  const loadingCustomersCount = isAll ? loadingAllMetrics : loadingRangeMetrics;
+  const loadingRevenueTotal = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
+  const loadingOrdersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
+  const loadingCustomersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
   const unfulfilledOrders = isAll ? unfulfilledOrdersAll : unfulfilledOrdersRange;
   const loadingUnfulfilled = isAll ? loadingUnfulfilledAll : loadingUnfulfilledRange;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
-  const prevRevenue = compareMetrics?.revenue ?? 0;
+  const prevRevenue = compareBreakdown?.gross_revenue ?? 0;
   const revDelta =
-    !isAll && prevRevenue > 0 ? (((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
+    !isAll && prevRevenue > 0 ? (((grossRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
   const barChartData = useMemo(
     () => series.map((p) => ({ month: p.label, revenue: p.revenue, orders: p.orders })),
     [series],
@@ -138,7 +142,7 @@ export default function AdminDashboardPage() {
   const [dismissedUntilMs, setDismissedUntilMs] = useState(0);
   const [salespersonSearch, setSalespersonSearch] = useState("");
   const [salespersonPage, setSalespersonPage] = useState(1);
-  const { data: salespersonPerformance = [], isLoading: loadingSalespersonPerformance } = useSalespersonPerformance(
+  const { data: salespersonPerformance = [], isLoading: loadingSalespersonPerformance } = useSalespersonFinancialBreakdown(
     "admin",
     isAll ? null : fromIso,
     isAll ? null : toIso,
@@ -178,7 +182,12 @@ export default function AdminDashboardPage() {
       salespersonPerformance.map((sp) => ({
         name: sp.salesperson_name.split(" ")[0],
         fullName: sp.salesperson_name,
-        revenue: Number(sp.revenue || 0),
+        grossRevenue: Number(sp.gross_revenue || 0),
+        refundedAmount: Number(sp.refunded_amount || 0),
+        netRevenue: Number(sp.net_revenue || 0),
+        ordersTotal: Number(sp.orders_total_count || 0),
+        ordersPaid: Number(sp.orders_paid_count || 0),
+        ordersRefunded: Number(sp.orders_refunded_count || 0),
         custCount: Number(sp.customers_count || 0),
       })),
     [salespersonPerformance],
@@ -195,7 +204,7 @@ export default function AdminDashboardPage() {
   const SALES_ROWS_PER_PAGE = 8;
   const topSalesRows = useMemo(() => salesRows.slice(0, 8), [salesRows]);
   const topSalesMaxRevenue = useMemo(
-    () => Math.max(1, ...topSalesRows.map((row) => Number(row.revenue || 0))),
+    () => Math.max(1, ...topSalesRows.map((row) => Number(row.netRevenue || 0))),
     [topSalesRows],
   );
   const salespersonTotalPages = Math.max(1, Math.ceil(filteredSalesRows.length / SALES_ROWS_PER_PAGE));
@@ -345,27 +354,58 @@ export default function AdminDashboardPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <KpiCard
-          title="Total Revenue"
+          title="Gross Revenue"
           value={
             loadingRevenueTotal ? (
               <Skeleton className="h-8 w-24 rounded-md" />
             ) : (
-              formatOrderMoney(totalRevenue, null, currency)
+              formatOrderMoney(grossRevenue, null, currency)
             )
           }
           icon={PoundSterling}
+          info="Sum of all non-test order totals in scope and period, across all financial statuses."
           delay={50}
+        />
+        <KpiCard
+          title="Net Revenue"
+          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(netRevenue, null, currency)}
+          icon={PoundSterling}
+          info="Gross revenue minus refunded/partially refunded/voided order amounts."
+          delay={75}
+        />
+        <KpiCard
+          title="Refunded Amount"
+          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(refundedAmount, null, currency)}
+          icon={PoundSterling}
+          info="Sum of non-test orders with refunded, partially_refunded, or voided financial status."
+          delay={90}
         />
         <KpiCard
           title="Total Orders"
           value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
           icon={ShoppingCart}
+          info="Count of all non-test orders in scope and period, regardless of payment status."
           delay={100}
+        />
+        <KpiCard
+          title="Paid Orders"
+          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : paidOrders.toString()}
+          icon={ShoppingCart}
+          info="Orders with financial status paid or partially_paid."
+          delay={120}
+        />
+        <KpiCard
+          title="Refunded Orders"
+          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : refundedOrders.toString()}
+          icon={ShoppingCart}
+          info="Orders with financial status refunded, partially_refunded, or voided."
+          delay={140}
         />
         <KpiCard
           title="Total Customers"
           value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
           icon={Users}
+          info="Scoped customers in the selected period (customer created-at filter)."
           delay={150}
         />
         <Link to="/orders?fulfillment=unfulfilled" className="block">
@@ -379,15 +419,15 @@ export default function AdminDashboardPage() {
       </div>
 
       <div className={`grid grid-cols-1 items-stretch gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>
-        <div className="card-float p-5 h-full flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
+        <div className="card-float p-5 h-full min-h-[320px] flex flex-col opacity-0 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <h3 className="font-heading font-semibold text-foreground mb-4">
             {trendTitle}
           </h3>
           {loadingBar ? (
-            <Skeleton className="h-[220px] w-full rounded-xl" />
+            <Skeleton className="flex-1 min-h-[220px] w-full rounded-xl" />
           ) : (
             <div className="flex-1 min-h-[220px] min-w-0">
-              <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
                 <BarChart
                   data={barChartData}
                   margin={{ top: 6, right: 0, left: 0, bottom: 0 }}
@@ -407,10 +447,10 @@ export default function AdminDashboardPage() {
         </div>
         {!loadingSalespersonPerformance && salesBySP.length > 0 && (
           <div className="card-float p-5 h-full opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
-            <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 Salesperson Revenue Progress</h3>
+            <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 Salesperson Net Revenue Progress</h3>
             <div className="space-y-3">
               {topSalesRows.map((sp, idx) => {
-                const widthPct = Math.max(4, Math.round((Number(sp.revenue || 0) / topSalesMaxRevenue) * 100));
+                const widthPct = Math.max(4, Math.round((Number(sp.netRevenue || 0) / topSalesMaxRevenue) * 100));
                 const barColor = TOP_SALES_BAR_COLORS[idx % TOP_SALES_BAR_COLORS.length];
                 return (
                   <div key={sp.fullName} className="flex items-center gap-3">
@@ -425,7 +465,7 @@ export default function AdminDashboardPage() {
                     <div className="w-[150px] text-right">
                       <p className="text-xs font-medium text-foreground truncate">{sp.name}</p>
                       <p className="text-[11px] text-muted-foreground font-body">
-                        {formatOrderMoney(sp.revenue, null, currency)}
+                        {formatOrderMoney(sp.netRevenue, null, currency)}
                       </p>
                     </div>
                   </div>
@@ -454,7 +494,7 @@ export default function AdminDashboardPage() {
           </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm font-body">
-              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Customers</th><th className="text-right py-2.5 font-medium">Revenue</th></tr></thead>
+              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Gross</th><th className="text-right py-2.5 font-medium">Refund Amt</th><th className="text-right py-2.5 font-medium">Net</th></tr></thead>
               <tbody>
                 {pagedSalesRows.map((sp) => {
                   return (
@@ -472,7 +512,12 @@ export default function AdminDashboardPage() {
                         </div>
                       </td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.custCount}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.revenue, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{sp.ordersTotal}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{sp.ordersPaid}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{sp.ordersRefunded}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.grossRevenue, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.refundedAmount, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)}</td>
                     </tr>
                   );
                 })}
@@ -485,8 +530,8 @@ export default function AdminDashboardPage() {
                 <div key={sp.fullName} className="p-3 rounded-xl bg-muted/50 tap-scale">
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>
                   <div className="flex justify-between text-xs font-body text-muted-foreground mt-1">
-                    <span>{sp.custCount} customers</span>
-                    <span className="font-medium text-foreground">{formatOrderMoney(sp.revenue, null, currency)}</span>
+                    <span>{sp.custCount} customers · {sp.ordersTotal} orders</span>
+                    <span className="font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)} net</span>
                   </div>
                 </div>
               );

@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Info } from "lucide-react";
 import { type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface KpiCardProps {
   title: string;
@@ -9,9 +10,10 @@ interface KpiCardProps {
   change?: number;
   icon: LucideIcon;
   delay?: number;
+  info?: string;
 }
 
-export function KpiCard({ title, value, change, icon: Icon, delay = 0 }: KpiCardProps) {
+export function KpiCard({ title, value, change, icon: Icon, delay = 0, info }: KpiCardProps) {
   return (
     <div
       className="card-kpi tap-scale opacity-0 animate-fade-in"
@@ -36,7 +38,27 @@ export function KpiCard({ title, value, change, icon: Icon, delay = 0 }: KpiCard
       <div className="min-w-0 text-xl sm:text-2xl font-heading font-bold text-foreground leading-tight [overflow-wrap:anywhere]">
         {value}
       </div>
-      <p className="text-sm text-muted-foreground font-body mt-0.5">{title}</p>
+      <div className="mt-0.5 flex items-center gap-1.5">
+        <p className="text-sm text-muted-foreground font-body">{title}</p>
+        {info ? (
+          <TooltipProvider delayDuration={120}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground/80 hover:text-foreground"
+                  aria-label={`Explain ${title}`}
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[280px] text-xs font-body leading-5">
+                {info}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
+      </div>
     </div>
   );
 }
