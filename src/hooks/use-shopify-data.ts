@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";
-import { devError } from "@/lib/dev-logger";
+import { devError, devInfo } from "@/lib/dev-logger";
 import { useQuery } from "@tanstack/react-query";
 
 export type SalespersonPerformanceRow = {
@@ -65,6 +65,24 @@ export type TeamMemberOption = {
   user_id: string;
   label: string;
 };
+
+async function withQueryTiming<T>(
+  label: string,
+  context: Record<string, unknown>,
+  run: () => Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  try {
+    const result = await run();
+    const elapsedMs = Math.round(performance.now() - start);
+    devInfo("[query:ok]", label, { elapsedMs, ...context });
+    return result;
+  } catch (error) {
+    const elapsedMs = Math.round(performance.now() - start);
+    devError("[query:error]", label, { elapsedMs, ...context, error });
+    throw error;
+  }
+}
 
 export type RecentCustomerOrder = {
   id: string;
@@ -145,7 +163,7 @@ export function useScopeOrderMetrics(
 ) {
   return useQuery({
     queryKey: ["scope-order-metrics", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("get_scope_order_metrics", { viewerUserId, fromIso: fromIso ?? null, toIso: toIso ?? null }, async () => {
       if (!viewerUserId) {
         return { orders_count: 0, customers_count: 0, revenue: 0, avg_order_value: 0 } satisfies ScopeOrderMetrics;
       }
@@ -166,7 +184,7 @@ export function useScopeOrderMetrics(
         revenue: Number(row.revenue || 0),
         avg_order_value: Number(row.avg_order_value || 0),
       } satisfies ScopeOrderMetrics;
-    },
+    }),
     staleTime: 60_000,
     enabled: enabled && Boolean(viewerUserId),
   });
@@ -180,7 +198,7 @@ export function useScopeFinancialBreakdown(
 ) {
   return useQuery({
     queryKey: ["scope-financial-breakdown", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("get_scope_financial_breakdown", { viewerUserId, fromIso: fromIso ?? null, toIso: toIso ?? null }, async () => {
       if (!viewerUserId) {
         return {
           customers_count: 0,
@@ -214,7 +232,7 @@ export function useScopeFinancialBreakdown(
         avg_order_gross: Number(row.avg_order_gross || 0),
         avg_order_net: Number(row.avg_order_net || 0),
       } satisfies ScopeFinancialBreakdown;
-    },
+    }),
     staleTime: 60_000,
     enabled: enabled && Boolean(viewerUserId),
   });
@@ -227,7 +245,11 @@ export function useSalespersonPerformance(
 ) {
   return useQuery({
     queryKey: ["salesperson-performance", scopeKey, fromIso ?? "none", toIso ?? "none"],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useSalespersonPerformance", {
+      scopeKey,
+      fromIso: fromIso ?? null,
+      toIso: toIso ?? null,
+    }, async () => {
       const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
         _leader_user_id: null,
         _leader_role: null,
@@ -241,7 +263,7 @@ export function useSalespersonPerformance(
         orders_count: Number(row.orders_count || 0),
         revenue: Number(row.revenue || 0),
       }));
-    },
+    }),
     staleTime: 60_000,
   });
 }
@@ -250,13 +272,23 @@ export function useSalespersonFinancialBreakdown(
   scopeKey = "global",
   fromIso: string | null | undefined = null,
   toIso: string | null | undefined = null,
+  leaderUserId: string | null | undefined = null,
+  leaderRole: "manager" | "supervisor" | null = null,
+  enabled = true,
 ) {
   return useQuery({
-    queryKey: ["salesperson-financial-breakdown", scopeKey, fromIso ?? "none", toIso ?? "none"],
-    queryFn: async () => {
+    queryKey: [
+      "salesperson-financial-breakdown",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+      leaderUserId ?? "none",
+      leaderRole ?? "none",
+    ],
+    queryFn: async () => withQueryTiming("get_salesperson_financial_breakdown_rows", { scopeKey, fromIso: fromIso ?? null, toIso: toIso ?? null }, async () => {
       const { data, error } = await supabase.rpc("get_salesperson_financial_breakdown_rows", {
-        _leader_user_id: null,
-        _leader_role: null,
+        _leader_user_id: leaderUserId ?? null,
+        _leader_role: leaderRole ?? null,
         _from_iso: fromIso ?? null,
         _to_iso: toIso ?? null,
       });
@@ -274,8 +306,9 @@ export function useSalespersonFinancialBreakdown(
         avg_order_gross: Number(row.avg_order_gross || 0),
         avg_order_net: Number(row.avg_order_net || 0),
       }));
-    },
+    }),
     staleTime: 60_000,
+    enabled,
   });
 }
 
@@ -288,7 +321,13 @@ export function useDirectReportSalesPerformance(
 ) {
   return useQuery({
     queryKey: ["direct-report-sales-performance", leaderUserId ?? "none", leaderRole, scopeKey, fromIso ?? "none", toIso ?? "none"],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useDirectReportSalesPerformance", {
+      leaderUserId: leaderUserId ?? null,
+      leaderRole,
+      scopeKey,
+      fromIso: fromIso ?? null,
+      toIso: toIso ?? null,
+    }, async () => {
       if (!leaderUserId) return [];
       const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
         _leader_user_id: leaderUserId,
@@ -303,7 +342,7 @@ export function useDirectReportSalesPerformance(
         orders_count: Number(row.orders_count || 0),
         revenue: Number(row.revenue || 0),
       }));
-    },
+    }),
     staleTime: 60_000,
     enabled: Boolean(leaderUserId),
   });
@@ -323,7 +362,12 @@ export function useSupervisorManagerScopePerformance(
       fromIso ?? "none",
       toIso ?? "none",
     ],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useSupervisorManagerScopePerformance", {
+      supervisorUserId: supervisorUserId ?? null,
+      scopeKey,
+      fromIso: fromIso ?? null,
+      toIso: toIso ?? null,
+    }, async () => {
       if (!supervisorUserId) return [];
       const { data, error } = await supabase.rpc("get_supervisor_manager_scope_scorecards", {
         _supervisor_user_id: supervisorUserId,
@@ -332,7 +376,7 @@ export function useSupervisorManagerScopePerformance(
       });
       if (error) throw error;
       return (data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[];
-    },
+    }),
     staleTime: 60_000,
     enabled: Boolean(supervisorUserId),
   });
@@ -341,27 +385,13 @@ export function useSupervisorManagerScopePerformance(
 export function useManagerTeamMemberOptions(managerUserId: string | undefined, scopeKey = "global") {
   return useQuery({
     queryKey: ["manager-team-member-options", managerUserId ?? "none", scopeKey],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useManagerTeamMemberOptions", {
+      managerUserId: managerUserId ?? null,
+      scopeKey,
+    }, async () => {
       if (!managerUserId) return [] as TeamMemberOption[];
-      const { data: edges, error: edgesError } = await supabase
-        .from("sales_hierarchy_edges")
-        .select("member_user_id")
-        .eq("leader_user_id", managerUserId)
-        .eq("leader_role", "manager");
-      if (edgesError) throw edgesError;
-
-      const memberIds = Array.from(
-        new Set(
-          ((edges ?? []) as { member_user_id: string }[])
-            .map((row) => row.member_user_id)
-            .filter(Boolean),
-        ),
-      );
-      if (!memberIds.length) return [] as TeamMemberOption[];
-
-      const { data, error } = await (supabase as any).rpc("get_scoped_user_display_names", {
-        _viewer_user_id: managerUserId,
-        _target_user_ids: memberIds,
+      const { data, error } = await (supabase as any).rpc("get_manager_team_member_options", {
+        _manager_user_id: managerUserId,
       });
       if (error) throw error;
       return ((data ?? []) as { user_id?: string | null; display_name?: string | null }[])
@@ -371,7 +401,7 @@ export function useManagerTeamMemberOptions(managerUserId: string | undefined, s
         }))
         .filter((row) => row.user_id)
         .sort((a, b) => a.label.localeCompare(b.label));
-    },
+    }),
     staleTime: 60_000,
     enabled: Boolean(managerUserId),
   });
@@ -380,28 +410,22 @@ export function useManagerTeamMemberOptions(managerUserId: string | undefined, s
 export function useSupervisorManagerOptions(supervisorUserId: string | undefined, scopeKey = "global") {
   return useQuery({
     queryKey: ["supervisor-manager-options", supervisorUserId ?? "none", scopeKey],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useSupervisorManagerOptions", {
+      supervisorUserId: supervisorUserId ?? null,
+      scopeKey,
+    }, async () => {
       if (!supervisorUserId) return [] as TeamMemberOption[];
-      const { data, error } = await supabase.rpc("get_supervisor_manager_scope_scorecards", {
+      const { data, error } = await (supabase as any).rpc("get_supervisor_manager_options", {
         _supervisor_user_id: supervisorUserId,
-        _from_iso: null,
-        _to_iso: null,
       });
       if (error) throw error;
-      const rows = (data ?? []) as (ViewerScopePerformanceRow & { manager_name: string })[];
-      const seen = new Set<string>();
-      return rows
-        .filter((row) => {
-          const id = String(row.viewer_user_id || "");
-          if (!id || seen.has(id)) return false;
-          seen.add(id);
-          return true;
-        })
+      return ((data ?? []) as { user_id?: string | null; display_name?: string | null }[])
         .map((row) => ({
-          user_id: row.viewer_user_id,
-          label: row.manager_name || "Manager",
-        }));
-    },
+          user_id: String(row.user_id ?? ""),
+          label: String(row.display_name ?? "").trim() || "Manager",
+        }))
+        .filter((row) => row.user_id);
+    }),
     staleTime: 60_000,
     enabled: Boolean(supervisorUserId),
   });
@@ -410,18 +434,22 @@ export function useSupervisorManagerOptions(supervisorUserId: string | undefined
 export function useSupervisorSalespersonOptions(supervisorUserId: string | undefined, scopeKey = "global") {
   return useQuery({
     queryKey: ["supervisor-salesperson-options", supervisorUserId ?? "none", scopeKey],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useSupervisorSalespersonOptions", {
+      supervisorUserId: supervisorUserId ?? null,
+      scopeKey,
+    }, async () => {
       if (!supervisorUserId) return [] as TeamMemberOption[];
-      const { data, error } = await supabase.rpc("get_salesperson_performance_rows", {
-        _leader_user_id: supervisorUserId,
-        _leader_role: "supervisor",
+      const { data, error } = await (supabase as any).rpc("get_supervisor_salesperson_options", {
+        _supervisor_user_id: supervisorUserId,
       });
       if (error) throw error;
-      return ((data ?? []) as SalespersonPerformanceRow[]).map((row) => ({
-        user_id: row.salesperson_user_id,
-        label: row.salesperson_name || "Salesperson",
-      }));
-    },
+      return ((data ?? []) as { user_id?: string | null; display_name?: string | null }[])
+        .map((row) => ({
+          user_id: String(row.user_id ?? ""),
+          label: String(row.display_name ?? "").trim() || "Salesperson",
+        }))
+        .filter((row) => row.user_id);
+    }),
     staleTime: 60_000,
     enabled: Boolean(supervisorUserId),
   });
@@ -567,45 +595,86 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     return count + 1;
   }, 0);
 
-  const orderMap = new Map<string, { total: number; at: string }>();
-  const absorbOrders = (rows: { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]) => {
+  const normalizeFinancialStatus = (status: string | null | undefined) => {
+    const value = (status ?? "").trim().toLowerCase();
+    if (value === "partially paid") return "partially_paid";
+    if (value === "partially refunded") return "partially_refunded";
+    return value || "pending";
+  };
+  const orderMap = new Map<string, { total: number; at: string; status: string }>();
+  const absorbOrders = (
+    rows: {
+      id: string;
+      total: number | null;
+      financial_status: string | null;
+      shopify_created_at: string | null;
+      created_at: string | null;
+    }[],
+  ) => {
     for (const row of rows) {
       if (orderMap.has(row.id)) continue;
       const at = row.shopify_created_at || row.created_at;
       if (!at) continue;
       if (!isInRange(at)) continue;
-      orderMap.set(row.id, { total: Number(row.total || 0), at });
+      orderMap.set(row.id, { total: Number(row.total || 0), at, status: normalizeFinancialStatus(row.financial_status) });
     }
   };
 
   for (const part of splitIntoChunks(customerIds, 200)) {
     const query = supabase
       .from("shopify_orders")
-      .select("id, total, shopify_created_at, created_at")
+      .select("id, total, financial_status, shopify_created_at, created_at")
       .in("customer_id", part);
     const { data, error } = await query;
     if (error) throw error;
-    absorbOrders((data ?? []) as { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]);
+    absorbOrders(
+      (data ?? []) as {
+        id: string;
+        total: number | null;
+        financial_status: string | null;
+        shopify_created_at: string | null;
+        created_at: string | null;
+      }[],
+    );
   }
 
   for (const part of splitIntoChunks(shopifyCustomerIds, 200)) {
     const query = supabase
       .from("shopify_orders")
-      .select("id, total, shopify_created_at, created_at")
+      .select("id, total, financial_status, shopify_created_at, created_at")
       .is("customer_id", null)
       .in("shopify_customer_id", part);
     const { data, error } = await query;
     if (error) throw error;
-    absorbOrders((data ?? []) as { id: string; total: number | null; shopify_created_at: string | null; created_at: string | null }[]);
+    absorbOrders(
+      (data ?? []) as {
+        id: string;
+        total: number | null;
+        financial_status: string | null;
+        shopify_created_at: string | null;
+        created_at: string | null;
+      }[],
+    );
   }
 
   const seriesMap = new Map<string, TimeseriesPoint & { sortKey: string }>();
-  let revenue = 0;
+  let grossRevenue = 0;
+  let refundedAmount = 0;
   let ordersCount = 0;
+  let ordersPaidCount = 0;
+  let ordersPendingCount = 0;
+  let ordersRefundedCount = 0;
 
   for (const [, order] of orderMap) {
-    revenue += order.total;
+    grossRevenue += order.total;
     ordersCount += 1;
+    if (order.status === "paid" || order.status === "partially_paid") ordersPaidCount += 1;
+    else if (order.status === "refunded" || order.status === "partially_refunded" || order.status === "voided") {
+      ordersRefundedCount += 1;
+      refundedAmount += order.total;
+    } else {
+      ordersPendingCount += 1;
+    }
     const date = new Date(order.at);
     let key: string;
     let label: string;
@@ -633,12 +702,22 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   const series = Array.from(seriesMap.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([, v]) => ({ label: v.label, revenue: v.revenue, orders: v.orders }));
+  const netRevenue = grossRevenue - refundedAmount;
 
   return {
     orders_count: ordersCount,
     customers_count: customersCount,
-    revenue,
-    avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
+    revenue: grossRevenue,
+    avg_order_value: ordersCount > 0 ? grossRevenue / ordersCount : 0,
+    orders_total_count: ordersCount,
+    orders_paid_count: ordersPaidCount,
+    orders_pending_count: ordersPendingCount,
+    orders_refunded_count: ordersRefundedCount,
+    gross_revenue: grossRevenue,
+    refunded_amount: refundedAmount,
+    net_revenue: netRevenue,
+    avg_order_gross: ordersCount > 0 ? grossRevenue / ordersCount : 0,
+    avg_order_net: ordersCount > 0 ? netRevenue / ordersCount : 0,
     series,
   };
 }
@@ -660,7 +739,94 @@ export function useSalespeopleScopedMetricsAndSeries(
       bucket,
       [...salespersonUserIds].sort().join(","),
     ],
-    queryFn: () => fetchScopedMetricsAndSeriesBySalespeople(salespersonUserIds, fromIso, toIso, bucket),
+    queryFn: async () => {
+      if (!salespersonUserIds.length) {
+        return {
+          orders_count: 0,
+          customers_count: 0,
+          revenue: 0,
+          avg_order_value: 0,
+          orders_total_count: 0,
+          orders_paid_count: 0,
+          orders_pending_count: 0,
+          orders_refunded_count: 0,
+          gross_revenue: 0,
+          refunded_amount: 0,
+          net_revenue: 0,
+          avg_order_gross: 0,
+          avg_order_net: 0,
+          series: [] as TimeseriesPoint[],
+        };
+      }
+      const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
+      if (!viewerUserId) {
+        return {
+          orders_count: 0,
+          customers_count: 0,
+          revenue: 0,
+          avg_order_value: 0,
+          orders_total_count: 0,
+          orders_paid_count: 0,
+          orders_pending_count: 0,
+          orders_refunded_count: 0,
+          gross_revenue: 0,
+          refunded_amount: 0,
+          net_revenue: 0,
+          avg_order_gross: 0,
+          avg_order_net: 0,
+          series: [] as TimeseriesPoint[],
+        };
+      }
+      const { data, error } = await (supabase as any).rpc("get_selected_salespeople_scope_metrics_timeseries", {
+        _viewer_user_id: viewerUserId,
+        _salesperson_user_ids: salespersonUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+        _bucket: bucket,
+      });
+      if (error) throw error;
+      const row = (data?.[0] ?? {}) as {
+        orders_count?: number;
+        customers_count?: number;
+        revenue?: number;
+        avg_order_value?: number;
+        orders_total_count?: number;
+        orders_paid_count?: number;
+        orders_pending_count?: number;
+        orders_refunded_count?: number;
+        gross_revenue?: number;
+        refunded_amount?: number;
+        net_revenue?: number;
+        avg_order_gross?: number;
+        avg_order_net?: number;
+        series?: Array<{ label?: string; revenue?: number; orders?: number }> | string | null;
+      };
+      const parsedSeries = Array.isArray(row.series)
+        ? row.series
+        : typeof row.series === "string"
+          ? (JSON.parse(row.series) as Array<{ label?: string; revenue?: number; orders?: number }>)
+          : [];
+      return {
+        orders_count: Number(row.orders_count || 0),
+        customers_count: Number(row.customers_count || 0),
+        revenue: Number(row.revenue || 0),
+        avg_order_value: Number(row.avg_order_value || 0),
+        orders_total_count: Number(row.orders_total_count || 0),
+        orders_paid_count: Number(row.orders_paid_count || 0),
+        orders_pending_count: Number(row.orders_pending_count || 0),
+        orders_refunded_count: Number(row.orders_refunded_count || 0),
+        gross_revenue: Number(row.gross_revenue || 0),
+        refunded_amount: Number(row.refunded_amount || 0),
+        net_revenue: Number(row.net_revenue || 0),
+        avg_order_gross: Number(row.avg_order_gross || 0),
+        avg_order_net: Number(row.avg_order_net || 0),
+        series: parsedSeries.map((item) => ({
+          label: String(item.label ?? ""),
+          revenue: Number(item.revenue || 0),
+          orders: Number(item.orders || 0),
+        })),
+      };
+    },
     staleTime: 60_000,
     enabled: enabled && salespersonUserIds.length > 0,
   });
@@ -711,35 +877,80 @@ export function useAggregateScopeMetricsForViewers(
       if (!viewerUserIds.length) {
         return { orders_count: 0, customers_count: 0, revenue: 0, avg_order_value: 0 } satisfies ScopeOrderMetrics;
       }
-      const metrics = await Promise.all(
-        viewerUserIds.map(async (viewerId) => {
-          const { data, error } = await supabase.rpc("get_scope_order_metrics", {
-            _viewer_user_id: viewerId,
-            _from_iso: fromIso ?? null,
-            _to_iso: toIso ?? null,
-          });
-          if (error) throw error;
-          const row = (data?.[0] ?? {}) as Partial<ScopeOrderMetrics>;
-          return {
-            orders_count: Number(row.orders_count || 0),
-            customers_count: Number(row.customers_count || 0),
-            revenue: Number(row.revenue || 0),
-          };
-        }),
-      );
-      const totals = metrics.reduce(
-        (acc, row) => {
-          acc.orders_count += row.orders_count;
-          acc.customers_count += row.customers_count;
-          acc.revenue += row.revenue;
-          return acc;
-        },
-        { orders_count: 0, customers_count: 0, revenue: 0 },
-      );
+      const { data, error } = await (supabase as any).rpc("get_scope_order_metrics_for_viewers", {
+        _viewer_user_ids: viewerUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      const row = (data?.[0] ?? {}) as Partial<ScopeOrderMetrics>;
+      const totals = {
+        orders_count: Number(row.orders_count || 0),
+        customers_count: Number(row.customers_count || 0),
+        revenue: Number(row.revenue || 0),
+      };
       return {
         ...totals,
         avg_order_value: totals.orders_count > 0 ? totals.revenue / totals.orders_count : 0,
       } satisfies ScopeOrderMetrics;
+    },
+    staleTime: 60_000,
+    enabled: enabled && viewerUserIds.length > 0,
+  });
+}
+
+export function useAggregateFinancialBreakdownForViewers(
+  viewerUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "aggregate-financial-breakdown-for-viewers",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+      [...viewerUserIds].sort().join(","),
+    ],
+    queryFn: async () => {
+      if (!viewerUserIds.length) {
+        return {
+          customers_count: 0,
+          orders_total_count: 0,
+          orders_paid_count: 0,
+          orders_pending_count: 0,
+          orders_refunded_count: 0,
+          gross_revenue: 0,
+          refunded_amount: 0,
+          net_revenue: 0,
+          avg_order_gross: 0,
+          avg_order_net: 0,
+        } satisfies ScopeFinancialBreakdown;
+      }
+      const { data, error } = await (supabase as any).rpc("get_scope_financial_breakdown_for_viewers", {
+        _viewer_user_ids: viewerUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      const row = (data?.[0] ?? {}) as Partial<ScopeFinancialBreakdown>;
+      const totals = {
+        customers_count: Number(row.customers_count || 0),
+        orders_total_count: Number(row.orders_total_count || 0),
+        orders_paid_count: Number(row.orders_paid_count || 0),
+        orders_pending_count: Number(row.orders_pending_count || 0),
+        orders_refunded_count: Number(row.orders_refunded_count || 0),
+        gross_revenue: Number(row.gross_revenue || 0),
+        refunded_amount: Number(row.refunded_amount || 0),
+        net_revenue: Number(row.net_revenue || 0),
+      };
+      return {
+        ...totals,
+        avg_order_gross: totals.orders_total_count > 0 ? totals.gross_revenue / totals.orders_total_count : 0,
+        avg_order_net: totals.orders_total_count > 0 ? totals.net_revenue / totals.orders_total_count : 0,
+      } satisfies ScopeFinancialBreakdown;
     },
     staleTime: 60_000,
     enabled: enabled && viewerUserIds.length > 0,
@@ -765,7 +976,14 @@ export function useSupervisorSelectedManagerTimeseries(
       bucket,
       [...managerUserIds].sort().join(","),
     ],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useSupervisorSelectedManagerTimeseries", {
+      supervisorUserId,
+      managerCount: managerUserIds.length,
+      fromIso: fromIso ?? null,
+      toIso: toIso ?? null,
+      bucket,
+      scopeKey,
+    }, async () => {
       if (!supervisorUserId || !managerUserIds.length) return [] as TimeseriesPoint[];
       const { data, error } = await (supabase as any).rpc("get_supervisor_selected_manager_timeseries", {
         _supervisor_user_id: supervisorUserId,
@@ -780,7 +998,7 @@ export function useSupervisorSelectedManagerTimeseries(
         revenue: Number(row.revenue || 0),
         orders: Number(row.orders_count || 0),
       }));
-    },
+    }),
     staleTime: 60_000,
     enabled: enabled && Boolean(supervisorUserId) && managerUserIds.length > 0,
   });
@@ -805,7 +1023,14 @@ export function useManagerSelectedSalespeopleTimeseries(
       bucket,
       [...salespersonUserIds].sort().join(","),
     ],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useManagerSelectedSalespeopleTimeseries", {
+      managerUserId,
+      salespersonCount: salespersonUserIds.length,
+      fromIso: fromIso ?? null,
+      toIso: toIso ?? null,
+      bucket,
+      scopeKey,
+    }, async () => {
       if (!managerUserId || !salespersonUserIds.length) return [] as TimeseriesPoint[];
       const { data, error } = await (supabase as any).rpc("get_manager_selected_salespeople_timeseries", {
         _manager_user_id: managerUserId,
@@ -820,7 +1045,7 @@ export function useManagerSelectedSalespeopleTimeseries(
         revenue: Number(row.revenue || 0),
         orders: Number(row.orders_count || 0),
       }));
-    },
+    }),
     staleTime: 60_000,
     enabled: enabled && Boolean(managerUserId) && salespersonUserIds.length > 0,
   });
@@ -915,8 +1140,12 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
         (params.scopeSalespersonIds?.length ?? 0) > 0 ||
         (params.scopeCustomerIds?.length ?? 0) > 0 ||
         (params.scopeOwnerNames?.length ?? 0) > 0;
-      if (requestedScopedFilter && scopedCustomerIdsFinal.length === 0) {
-        if (scopedSalespeopleFinal.length === 0 && scopedOwnerNamesFinal.length === 0) {
+      if (requestedScopedFilter || scopedCustomerIdsFinal.length > 0) {
+        if (
+          scopedCustomerIdsFinal.length === 0 &&
+          scopedSalespeopleFinal.length === 0 &&
+          scopedOwnerNamesFinal.length === 0
+        ) {
           return { data: [], count: 0 };
         }
         const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
@@ -935,6 +1164,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
           _page: page,
           _page_size: pageSize,
           _force_scoped_filter: true,
+          _customer_ids: scopedCustomerIdsFinal,
         });
         if (scopedError) throw scopedError;
         const rows = (scopedRows ?? []) as { row_data: any; total_count: number | null }[];
@@ -961,72 +1191,6 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       } else if (assignmentFilter === "unassigned") {
         query = query.or("sp_assigned.is.null,sp_assigned.eq.Unassigned");
       }
-      if (scopedCustomerIdsFinal.length > 0) {
-        // Large `.in(...)` lists can exceed URL limits on PostgREST.
-        // Fetch in chunks and paginate in-memory to avoid oversized query strings.
-        const allRows: any[] = [];
-        const seenCustomerIds = new Set<string>();
-        for (const part of splitIntoChunks(scopedCustomerIdsFinal, 150)) {
-          const batchSize = 1000;
-          let offset = 0;
-          while (true) {
-            let scopedChunkQuery = supabase
-              .from("shopify_customers")
-              .select("*")
-              .in("id", part);
-            if (q) {
-              const escaped = q.replace(/[%_]/g, "");
-              scopedChunkQuery = scopedChunkQuery.or(`name.ilike.%${escaped}%,city.ilike.%${escaped}%,email.ilike.%${escaped}%`);
-            }
-            if (cityFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("city", cityFilter);
-            if (fromIso) scopedChunkQuery = scopedChunkQuery.gte("shopify_created_at", fromIso);
-            if (toIso) scopedChunkQuery = scopedChunkQuery.lte("shopify_created_at", toIso);
-            if (assignmentFilter === "assigned") {
-              scopedChunkQuery = scopedChunkQuery.not("sp_assigned", "is", null).neq("sp_assigned", "Unassigned");
-            } else if (assignmentFilter === "unassigned") {
-              scopedChunkQuery = scopedChunkQuery.or("sp_assigned.is.null,sp_assigned.eq.Unassigned");
-            }
-
-            const { data: chunkRows, error: chunkError } = await scopedChunkQuery.range(offset, offset + batchSize - 1);
-            if (chunkError) throw chunkError;
-
-            const rows = chunkRows ?? [];
-            for (const row of rows) {
-              if (!row?.id || seenCustomerIds.has(row.id)) continue;
-              seenCustomerIds.add(row.id);
-              allRows.push(row);
-            }
-            if (rows.length < batchSize) break;
-            offset += batchSize;
-          }
-        }
-
-        const dir = sortDir === "asc" ? 1 : -1;
-        const toComparable = (value: unknown): number | string => {
-          if (value === null || value === undefined) return "";
-          if (typeof value === "number") return value;
-          if (typeof value === "string") {
-            const asTime = Date.parse(value);
-            if (!Number.isNaN(asTime)) return asTime;
-            const asNum = Number(value);
-            return Number.isNaN(asNum) ? value.toLowerCase() : asNum;
-          }
-          return String(value).toLowerCase();
-        };
-
-        allRows.sort((a, b) => {
-          const av = toComparable(a?.[sortBy]);
-          const bv = toComparable(b?.[sortBy]);
-          if (av < bv) return -1 * dir;
-          if (av > bv) return 1 * dir;
-          return 0;
-        });
-
-        const from = (page - 1) * pageSize;
-        const to = from + pageSize;
-        return { data: allRows.slice(from, to), count: allRows.length };
-      }
-
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
@@ -1054,6 +1218,8 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     enabled,
   });
 }
@@ -1409,7 +1575,13 @@ export function useScopeOrderTimeseries(
       bucket,
       scopeKey,
     ],
-    queryFn: async () => {
+    queryFn: async () => withQueryTiming("useScopeOrderTimeseries", {
+      viewerUserId,
+      fromIso: fromIso ?? null,
+      toIso: toIso ?? null,
+      bucket,
+      scopeKey,
+    }, async () => {
       if (!viewerUserId) return [] as TimeseriesPoint[];
       const { data, error } = await (supabase as any).rpc("get_scope_order_timeseries", {
         _viewer_user_id: viewerUserId,
@@ -1437,7 +1609,7 @@ export function useScopeOrderTimeseries(
         revenue: Number(row.revenue || 0),
         orders: Number(row.orders_count || 0),
       }));
-    },
+    }),
     staleTime: 60_000,
     enabled: enabled && Boolean(viewerUserId),
   });
@@ -1527,6 +1699,9 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
       ownerScopeKey,
     ],
     queryFn: async () => {
+      const scopedCustomerIdsFinal = Array.from(new Set(scopeCustomerIds.filter(Boolean)));
+      const scopedSalespeopleFinal = Array.from(new Set(scopeSalespersonIds.filter(Boolean)));
+      const scopedOwnerNamesFinal = Array.from(new Set(scopeOwnerNames.map((name) => name.trim()).filter(Boolean)));
       let query = supabase
         .from("shopify_orders")
         .select("*", { count: "exact" })
@@ -1545,11 +1720,16 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
         (params.scopeSalespersonIds?.length ?? 0) > 0 ||
         (params.scopeCustomerIds?.length ?? 0) > 0 ||
         (params.scopeOwnerNames?.length ?? 0) > 0;
-      if (requestedScopedFilter) {
+      if (requestedScopedFilter || scopedCustomerIdsFinal.length > 0) {
         const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
         if (!viewerUserId) return { data: [], count: 0 };
-        const scopedSalespeopleFinal = Array.from(new Set(scopeSalespersonIds.filter(Boolean)));
-        const scopedOwnerNamesFinal = Array.from(new Set(scopeOwnerNames.map((name) => name.trim()).filter(Boolean)));
+        if (
+          scopedCustomerIdsFinal.length === 0 &&
+          scopedSalespeopleFinal.length === 0 &&
+          scopedOwnerNamesFinal.length === 0
+        ) {
+          return { data: [], count: 0 };
+        }
         const { data: scopedRows, error: scopedError } = await (supabase as any).rpc("get_scoped_orders_page", {
           _viewer_user_id: viewerUserId,
           _salesperson_user_ids: scopedSalespeopleFinal,
@@ -1564,6 +1744,7 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
           _page: page,
           _page_size: pageSize,
           _force_scoped_filter: true,
+          _customer_ids: scopedCustomerIdsFinal,
         });
         if (scopedError) throw scopedError;
         const rows = (scopedRows ?? []) as { row_data: any; total_count: number | null }[];
@@ -1571,183 +1752,6 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
           data: rows.map((r) => r.row_data).filter(Boolean),
           count: Number(rows[0]?.total_count ?? 0),
         };
-      }
-      const scopedCustomerIdsFinal = Array.from(new Set(scopeCustomerIds.filter(Boolean)));
-      if (scopeSalespersonIds.length > 0) {
-        const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
-        if (!viewerUserId) return { data: [], count: 0 };
-        const scopedOrderIds = await fetchAllScopedOrderIdsForViewer(viewerUserId, scopeSalespersonIds);
-        if (!scopedOrderIds.length) return { data: [], count: 0 };
-
-        const allRows: any[] = [];
-        const seenOrderIds = new Set<string>();
-        for (const part of splitIntoChunks(scopedOrderIds, 150)) {
-          const batchSize = 1000;
-          let offset = 0;
-          while (true) {
-            let scopedChunkQuery = supabase
-              .from("shopify_orders")
-              .select("*")
-              .in("id", part);
-            if (q) {
-              const escaped = q.replace(/[%_]/g, "");
-              scopedChunkQuery = scopedChunkQuery.or(`order_number.ilike.%${escaped}%,customer_name.ilike.%${escaped}%`);
-            }
-            if (statusFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("financial_status", statusFilter);
-            if (fulfillmentFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("fulfillment_status", fulfillmentFilter);
-            if (fromIso) scopedChunkQuery = scopedChunkQuery.gte("shopify_created_at", fromIso);
-            if (toIso) scopedChunkQuery = scopedChunkQuery.lte("shopify_created_at", toIso);
-
-            const { data: chunkRows, error: chunkError } = await scopedChunkQuery.range(offset, offset + batchSize - 1);
-            if (chunkError) throw chunkError;
-
-            const rows = chunkRows ?? [];
-            for (const row of rows) {
-              if (!row?.id || seenOrderIds.has(row.id)) continue;
-              seenOrderIds.add(row.id);
-              allRows.push(row);
-            }
-            if (rows.length < batchSize) break;
-            offset += batchSize;
-          }
-        }
-
-        const dir = sortDir === "asc" ? 1 : -1;
-        const toComparable = (value: unknown): number | string => {
-          if (value === null || value === undefined) return "";
-          if (typeof value === "number") return value;
-          if (typeof value === "string") {
-            const asTime = Date.parse(value);
-            if (!Number.isNaN(asTime)) return asTime;
-            const asNum = Number(value);
-            return Number.isNaN(asNum) ? value.toLowerCase() : asNum;
-          }
-          return String(value).toLowerCase();
-        };
-
-        allRows.sort((a, b) => {
-          const av = toComparable(a?.[sortBy]);
-          const bv = toComparable(b?.[sortBy]);
-          if (av < bv) return -1 * dir;
-          if (av > bv) return 1 * dir;
-          return 0;
-        });
-
-        const from = (page - 1) * pageSize;
-        const to = from + pageSize;
-        return { data: allRows.slice(from, to), count: allRows.length };
-      }
-      if (requestedScopedFilter && scopedCustomerIdsFinal.length === 0) {
-        return { data: [], count: 0 };
-      }
-      if (scopedCustomerIdsFinal.length > 0) {
-        // Large `.in(...)` lists can exceed URL limits on PostgREST.
-        // Fetch in chunks and paginate in-memory to avoid 400 Bad Request.
-        const allRows: any[] = [];
-        const seenOrderIds = new Set<string>();
-        let scopedShopifyCustomerIds: string[] = [];
-        for (const part of splitIntoChunks(scopedCustomerIdsFinal, 200)) {
-          const { data: customerRows, error: customerRowsError } = await supabase
-            .from("shopify_customers")
-            .select("shopify_customer_id")
-            .in("id", part);
-          if (customerRowsError) throw customerRowsError;
-          for (const row of (customerRows ?? []) as { shopify_customer_id: string | null }[]) {
-            if (row.shopify_customer_id) scopedShopifyCustomerIds.push(row.shopify_customer_id);
-          }
-        }
-        scopedShopifyCustomerIds = Array.from(new Set(scopedShopifyCustomerIds));
-        for (const part of splitIntoChunks(scopedCustomerIdsFinal, 150)) {
-          const batchSize = 1000;
-          let offset = 0;
-          while (true) {
-            let scopedChunkQuery = supabase
-              .from("shopify_orders")
-              .select("*")
-              .in("customer_id", part);
-            if (q) {
-              const escaped = q.replace(/[%_]/g, "");
-              scopedChunkQuery = scopedChunkQuery.or(`order_number.ilike.%${escaped}%,customer_name.ilike.%${escaped}%`);
-            }
-            if (statusFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("financial_status", statusFilter);
-            if (fulfillmentFilter !== "all") scopedChunkQuery = scopedChunkQuery.eq("fulfillment_status", fulfillmentFilter);
-            if (fromIso) scopedChunkQuery = scopedChunkQuery.gte("shopify_created_at", fromIso);
-            if (toIso) scopedChunkQuery = scopedChunkQuery.lte("shopify_created_at", toIso);
-
-            const { data: chunkRows, error: chunkError } = await scopedChunkQuery.range(offset, offset + batchSize - 1);
-            if (chunkError) throw chunkError;
-
-            const rows = chunkRows ?? [];
-            for (const row of rows) {
-              if (!row?.id || seenOrderIds.has(row.id)) continue;
-              seenOrderIds.add(row.id);
-              allRows.push(row);
-            }
-            if (rows.length < batchSize) break;
-            offset += batchSize;
-          }
-        }
-        for (const part of splitIntoChunks(scopedShopifyCustomerIds, 150)) {
-          const batchSize = 1000;
-          let offset = 0;
-          while (true) {
-            let scopedByShopifyCustomerQuery = supabase
-              .from("shopify_orders")
-              .select("*")
-              .is("customer_id", null)
-              .in("shopify_customer_id", part);
-            if (q) {
-              const escaped = q.replace(/[%_]/g, "");
-              scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.or(
-                `order_number.ilike.%${escaped}%,customer_name.ilike.%${escaped}%`,
-              );
-            }
-            if (statusFilter !== "all") scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.eq("financial_status", statusFilter);
-            if (fulfillmentFilter !== "all") scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.eq("fulfillment_status", fulfillmentFilter);
-            if (fromIso) scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.gte("shopify_created_at", fromIso);
-            if (toIso) scopedByShopifyCustomerQuery = scopedByShopifyCustomerQuery.lte("shopify_created_at", toIso);
-
-            const { data: chunkRows, error: chunkError } = await scopedByShopifyCustomerQuery.range(
-              offset,
-              offset + batchSize - 1,
-            );
-            if (chunkError) throw chunkError;
-
-            const rows = chunkRows ?? [];
-            for (const row of rows) {
-              if (!row?.id || seenOrderIds.has(row.id)) continue;
-              seenOrderIds.add(row.id);
-              allRows.push(row);
-            }
-            if (rows.length < batchSize) break;
-            offset += batchSize;
-          }
-        }
-
-        const dir = sortDir === "asc" ? 1 : -1;
-        const toComparable = (value: unknown): number | string => {
-          if (value === null || value === undefined) return "";
-          if (typeof value === "number") return value;
-          if (typeof value === "string") {
-            const asTime = Date.parse(value);
-            if (!Number.isNaN(asTime)) return asTime;
-            const asNum = Number(value);
-            return Number.isNaN(asNum) ? value.toLowerCase() : asNum;
-          }
-          return String(value).toLowerCase();
-        };
-
-        allRows.sort((a, b) => {
-          const av = toComparable(a?.[sortBy]);
-          const bv = toComparable(b?.[sortBy]);
-          if (av < bv) return -1 * dir;
-          if (av > bv) return 1 * dir;
-          return 0;
-        });
-
-        const from = (page - 1) * pageSize;
-        const to = from + pageSize;
-        return { data: allRows.slice(from, to), count: allRows.length };
       }
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -1776,6 +1780,8 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
     enabled,
   });
 }
@@ -1889,7 +1895,10 @@ export function useProductsPaginated(params: ProductsQueryParams) {
     queryFn: async () => {
       let query = supabase
         .from("shopify_products")
-        .select("*, shopify_variants(*)", { count: "exact" })
+        .select(
+          "id, title, vendor, category, status, handle, tags, featured_image_url, created_at, updated_at",
+          { count: "exact" },
+        )
         .order(sortBy, { ascending: sortDir === "asc" });
       const q = search.trim();
       if (q) {
@@ -1906,6 +1915,42 @@ export function useProductsPaginated(params: ProductsQueryParams) {
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useProductVariantsByProductIds(productIds: string[], enabled = true) {
+  const dedupedIds = Array.from(new Set(productIds.filter(Boolean)));
+  return useQuery({
+    queryKey: ["shopify-product-variants-by-product-ids", dedupedIds.sort().join(",")],
+    queryFn: async () => {
+      if (!dedupedIds.length) return [] as {
+        id: string;
+        product_id: string;
+        title: string | null;
+        sku: string | null;
+        price: number | null;
+        stock: number | null;
+        inventory_location: string | null;
+      }[];
+      const { data, error } = await supabase
+        .from("shopify_variants")
+        .select("id, product_id, title, sku, price, stock, inventory_location")
+        .in("product_id", dedupedIds);
+      if (error) throw error;
+      return (data ?? []) as {
+        id: string;
+        product_id: string;
+        title: string | null;
+        sku: string | null;
+        price: number | null;
+        stock: number | null;
+        inventory_location: string | null;
+      }[];
+    },
+    staleTime: 60_000,
+    enabled: enabled && dedupedIds.length > 0,
   });
 }
 
@@ -1982,6 +2027,8 @@ export function useVariantsPaginated(params: VariantsQueryParams) {
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -2098,6 +2145,8 @@ export function useCollectionsPaginated(params: CollectionsQueryParams) {
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -2147,6 +2196,8 @@ export function usePurchaseOrdersPaginated(params: PurchaseOrdersQueryParams) {
       return { data: data ?? [], count: count ?? 0 };
     },
     placeholderData: (previousData) => previousData,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 

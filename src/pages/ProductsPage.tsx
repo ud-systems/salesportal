@@ -1,6 +1,6 @@
-import { useProductStatuses, useProductsPaginated } from "@/hooks/use-shopify-data";
+import { useProductStatuses, useProductsPaginated, useProductVariantsByProductIds } from "@/hooks/use-shopify-data";
 import { Package, AlertTriangle, Search, ChevronDown, ChevronRight, ImageIcon } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { BottomSheet } from "@/components/BottomSheet";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 
 export default function ProductsPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [stockFilter, setStockFilter] = useState("all");
@@ -32,10 +33,38 @@ export default function ProductsPage() {
   const statuses = statusesData ?? ["all"];
   const { data, isLoading, isFetching } = useProductsPaginated({ page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir });
   const products = data?.data ?? [];
+  const productIds = useMemo(() => products.map((p: { id: string }) => p.id).filter(Boolean), [products]);
+  const { data: variantsRows = [], isLoading: loadingVariants } = useProductVariantsByProductIds(
+    productIds,
+    products.length > 0,
+  );
+  const variantsByProductId = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const row of variantsRows) {
+      const list = map.get(row.product_id) ?? [];
+      list.push(row);
+      map.set(row.product_id, list);
+    }
+    return map;
+  }, [variantsRows]);
+  const productsWithVariants = useMemo(
+    () =>
+      products.map((p: any) => ({
+        ...p,
+        shopify_variants: variantsByProductId.get(p.id) ?? [],
+      })),
+    [products, variantsByProductId],
+  );
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const isRefreshing = isFetching && !isLoading;
 
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [searchInput]);
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
     update();
@@ -49,7 +78,7 @@ export default function ProductsPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const filtered = (products || []).filter((p: any) => {
+  const filtered = (productsWithVariants || []).filter((p: any) => {
     const totalStock = (p.shopify_variants || []).reduce((sum: number, v: any) => sum + Number(v.stock || 0), 0);
     const matchesStock = stockFilter === "all" ||
       (stockFilter === "low" ? totalStock <= 10 : stockFilter === "out" ? totalStock <= 0 : totalStock > 10);
@@ -85,7 +114,7 @@ export default function ProductsPage() {
       <div className="flex gap-3 opacity-0 animate-fade-in" style={{ animationDelay: "50ms" }}>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search products..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 rounded-xl h-10 font-body border-border" />
+          <Input placeholder="Search products..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} className="pl-9 rounded-xl h-10 font-body border-border" />
         </div>
         <button onClick={() => setFilterOpen(true)} className="h-10 px-4 rounded-xl border bg-card font-body text-sm text-muted-foreground hover:bg-muted transition-colors tap-scale lg:hidden">Filter</button>
       </div>
@@ -227,7 +256,7 @@ export default function ProductsPage() {
               </div>
             </div>
           ))}
-          {isRefreshing && <RecordsLoadingOverlay rows={4} className="rounded-xl" />}
+          {(isRefreshing || loadingVariants) && <RecordsLoadingOverlay rows={4} className="rounded-xl" />}
         </div>
         <div className="relative hidden lg:block card-float p-0 overflow-hidden opacity-0 animate-fade-in" style={{ animationDelay: "80ms" }}>
           <Table>
@@ -239,7 +268,7 @@ export default function ProductsPage() {
                 <TableHead>Vendor</TableHead>
                 <TableHead>Variants</TableHead>
                 <TableHead>Stock</TableHead>
-                <TableHead>Price Range</TableHead>
+                <TableHead>Net Price</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -328,7 +357,7 @@ export default function ProductsPage() {
               })}
             </TableBody>
           </Table>
-          {isRefreshing && <RecordsLoadingOverlay rows={6} className="rounded-none" />}
+          {(isRefreshing || loadingVariants) && <RecordsLoadingOverlay rows={6} className="rounded-none" />}
         </div>
         </>
       )}

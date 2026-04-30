@@ -231,10 +231,10 @@ export default function DashboardPage() {
           delay={100}
         />
         <KpiCard
-          title="Customers"
+          title="Registered Customers"
           value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
           icon={Users}
-          info="Customers in your scope, filtered by customer created date for the selected period."
+          info="Registered customers in your scope, filtered by customer created date for the selected period."
           delay={150}
         />
         <KpiCard

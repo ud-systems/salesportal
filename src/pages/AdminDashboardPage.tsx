@@ -146,6 +146,9 @@ export default function AdminDashboardPage() {
     "admin",
     isAll ? null : fromIso,
     isAll ? null : toIso,
+    null,
+    null,
+    Boolean(user?.id) && !loadingRevenueTotal,
   );
 
   useEffect(() => {
@@ -402,10 +405,10 @@ export default function AdminDashboardPage() {
           delay={140}
         />
         <KpiCard
-          title="Total Customers"
+          title="Registered Customers"
           value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
           icon={Users}
-          info="Scoped customers in the selected period (customer created-at filter)."
+          info="Scoped registered customers in the selected period (customer created-at filter)."
           delay={150}
         />
         <Link to="/orders?fulfillment=unfulfilled" className="block">
@@ -494,7 +497,7 @@ export default function AdminDashboardPage() {
           </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm font-body">
-              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Gross</th><th className="text-right py-2.5 font-medium">Refund Amt</th><th className="text-right py-2.5 font-medium">Net</th></tr></thead>
+              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Registered Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Gross</th><th className="text-right py-2.5 font-medium">Refund Amt</th><th className="text-right py-2.5 font-medium">Net</th></tr></thead>
               <tbody>
                 {pagedSalesRows.map((sp) => {
                   return (
@@ -530,7 +533,7 @@ export default function AdminDashboardPage() {
                 <div key={sp.fullName} className="p-3 rounded-xl bg-muted/50 tap-scale">
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>
                   <div className="flex justify-between text-xs font-body text-muted-foreground mt-1">
-                    <span>{sp.custCount} customers · {sp.ordersTotal} orders</span>
+                    <span>{sp.custCount} registered customers · {sp.ordersTotal} orders</span>
                     <span className="font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)} net</span>
                   </div>
                 </div>

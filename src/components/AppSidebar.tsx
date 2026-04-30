@@ -20,12 +20,10 @@ import {
 
 const salespersonNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Profile", url: "/profile", icon: UserCircle },
   { title: "Customers", url: "/customers", icon: Users },
   { title: "Orders", url: "/orders", icon: ShoppingCart },
   { title: "Products", url: "/products", icon: Package },
-  { title: "Inventory", url: "/inventory", icon: Boxes },
 ];
 
 const oversightNav: ({ title: string; url: string; icon: typeof LayoutDashboard; capability?: AppCapability })[] = [

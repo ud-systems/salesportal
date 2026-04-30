@@ -6,6 +6,7 @@ export type ReportFetchParams = {
   currency: string;
   viewerUserId?: string;
   lowStockThreshold?: number;
+  maxRows?: number;
 };
 
 export type ReportDefinition = {
@@ -109,12 +110,26 @@ export const ANALYTICS_REPORTS: ReportDefinition[] = [
   },
 ];
 
-const PAGE = 500;
+// Lower page size to reduce per-call payload and timeout risk on heavy scoped report pulls.
+const PAGE = 200;
+
+function asReportError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const message = [e.message, e.details, e.hint, e.code]
+      .filter((v) => typeof v === "string" && v.trim().length > 0)
+      .join(" | ");
+    if (message) return new Error(message);
+  }
+  return new Error("Report query failed");
+}
 
 async function paginateScopedOrdersInRange(
   viewerUserId: string,
   fromIso: string,
   toIso: string,
+  maxRows?: number,
 ): Promise<Record<string, unknown>[]> {
   const all: Record<string, unknown>[] = [];
   let page = 1;
@@ -133,11 +148,15 @@ async function paginateScopedOrdersInRange(
       _page: page,
       _page_size: PAGE,
       _force_scoped_filter: true,
+      _customer_ids: null,
     });
-    if (error) throw error;
+    if (error) throw asReportError(error);
     const rows = (data ?? []) as { row_data?: Record<string, unknown> | null; total_count?: number | null }[];
     const batch = rows.map((r) => r.row_data).filter((r): r is Record<string, unknown> => Boolean(r));
     all.push(...batch);
+    if (typeof maxRows === "number" && maxRows > 0 && all.length >= maxRows) {
+      return all.slice(0, maxRows);
+    }
     if (batch.length < PAGE) break;
     page += 1;
   }
@@ -148,6 +167,7 @@ async function paginateScopedCustomers(
   viewerUserId: string,
   fromIso: string | null,
   toIso: string | null,
+  maxRows?: number,
 ): Promise<Record<string, unknown>[]> {
   const all: Record<string, unknown>[] = [];
   let page = 1;
@@ -166,11 +186,15 @@ async function paginateScopedCustomers(
       _page: page,
       _page_size: PAGE,
       _force_scoped_filter: true,
+      _customer_ids: null,
     });
-    if (error) throw error;
+    if (error) throw asReportError(error);
     const rows = (data ?? []) as { row_data?: Record<string, unknown> | null; total_count?: number | null }[];
     const batch = rows.map((r) => r.row_data).filter((r): r is Record<string, unknown> => Boolean(r));
     all.push(...batch);
+    if (typeof maxRows === "number" && maxRows > 0 && all.length >= maxRows) {
+      return all.slice(0, maxRows);
+    }
     if (batch.length < PAGE) break;
     page += 1;
   }
@@ -181,6 +205,7 @@ async function paginateScopedOrderItemsInRange(
   viewerUserId: string,
   fromIso: string,
   toIso: string,
+  maxRows?: number,
 ): Promise<Record<string, unknown>[]> {
   const all: Record<string, unknown>[] = [];
   let page = 1;
@@ -195,67 +220,24 @@ async function paginateScopedOrderItemsInRange(
       _page_size: PAGE,
       _force_scoped_filter: true,
     });
-    if (error) throw error;
+    if (error) throw asReportError(error);
     const rows = (data ?? []) as { row_data?: Record<string, unknown> | null; total_count?: number | null }[];
     const batch = rows.map((r) => r.row_data).filter((r): r is Record<string, unknown> => Boolean(r));
     all.push(...batch);
+    if (typeof maxRows === "number" && maxRows > 0 && all.length >= maxRows) {
+      return all.slice(0, maxRows);
+    }
     if (batch.length < PAGE) break;
     page += 1;
   }
   return all;
 }
 
-async function paginateOrdersInRange(
-  fromIso: string,
-  toIso: string,
-  select: string,
-): Promise<Record<string, unknown>[]> {
-  const all: Record<string, unknown>[] = [];
-  let offset = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from("shopify_orders")
-      .select(select)
-      .gte("shopify_created_at", fromIso)
-      .lte("shopify_created_at", toIso)
-      .order("shopify_created_at", { ascending: false })
-      .range(offset, offset + PAGE - 1);
-    if (error) throw error;
-    const batch = data ?? [];
-    all.push(...batch);
-    if (batch.length < PAGE) break;
-    offset += PAGE;
-  }
-  return all;
-}
-
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-async function getUserNameMap(viewerUserId: string | undefined, userIds: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
-  if (!viewerUserId || !userIds.length) return map;
-  const { data, error } = await (supabase as any).rpc("get_scoped_user_display_names", {
-    _viewer_user_id: viewerUserId,
-    _target_user_ids: userIds,
-  });
-  if (error) throw error;
-  for (const row of (data ?? []) as { user_id?: string | null; display_name?: string | null }[]) {
-    const userId = String(row.user_id ?? "");
-    const displayName = String(row.display_name ?? "").trim();
-    if (userId && displayName) map.set(userId, displayName);
-  }
-  return map;
-}
-
 export async function fetchReportData(
   reportId: string,
   params: ReportFetchParams,
 ): Promise<{ columns: string[]; rows: (string | number)[][] }> {
-  const { fromIso, toIso, currency, viewerUserId, lowStockThreshold = 10 } = params;
+  const { fromIso, toIso, currency, viewerUserId, lowStockThreshold = 10, maxRows } = params;
 
   if (ANALYTICS_REPORTS.find((r) => r.id === reportId)?.requiresRange && (!fromIso || !toIso)) {
     throw new Error("Select a date range for this report.");
@@ -269,7 +251,7 @@ export async function fetchReportData(
         _from_iso: fromIso!,
         _to_iso: toIso!,
       });
-      if (error) throw error;
+      if (error) throw asReportError(error);
       const metrics = (data?.[0] ?? {}) as {
         orders_count?: number;
         customers_count?: number;
@@ -290,7 +272,7 @@ export async function fetchReportData(
 
     case "orders_detail": {
       if (!viewerUserId) throw new Error("Missing viewer context for orders detail.");
-      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!);
+      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!, maxRows);
       return {
         columns: [
           "Order",
@@ -326,7 +308,7 @@ export async function fetchReportData(
 
     case "line_items": {
       if (!viewerUserId) throw new Error("Missing viewer context for line items.");
-      const scopedItems = await paginateScopedOrderItemsInRange(viewerUserId, fromIso!, toIso!);
+      const scopedItems = await paginateScopedOrderItemsInRange(viewerUserId, fromIso!, toIso!, maxRows);
       const lines: (string | number)[][] = [];
       for (const row of scopedItems) {
         const qty = Number(row.quantity || 0);
@@ -351,191 +333,133 @@ export async function fetchReportData(
 
     case "top_products": {
       if (!viewerUserId) throw new Error("Missing viewer context for top products.");
-      const scopedItems = await paginateScopedOrderItemsInRange(viewerUserId, fromIso!, toIso!);
-      const agg = new Map<string, { units: number; revenue: number }>();
-      for (const row of scopedItems) {
-        const name = [String(row.product || "Item"), String(row.variant || "")].filter(Boolean).join(" — ");
-        const qty = Number(row.quantity || 0);
-        const rev = qty * Number(row.price || 0);
-        const prev = agg.get(name) || { units: 0, revenue: 0 };
-        prev.units += qty;
-        prev.revenue += rev;
-        agg.set(name, prev);
-      }
-      const sorted = [...agg.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+      const { data, error } = await (supabase as any).rpc("get_analytics_top_products", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{ product_name?: string | null; units_sold?: number | null; revenue?: number | null }>;
       return {
         columns: ["Product", "Units sold", "Revenue"],
-        rows: sorted.map(([name, v]) => [name, v.units, Number(v.revenue.toFixed(2))]),
+        rows: rows.map((row) => [
+          String(row.product_name ?? "Item"),
+          Number(row.units_sold ?? 0),
+          Number(row.revenue ?? 0),
+        ]),
       };
     }
 
     case "top_customers": {
       if (!viewerUserId) throw new Error("Missing viewer context for top customers.");
-      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!);
-      type Entry = { label: string; email: string; revenue: number; orders: number };
-      const agg = new Map<string, Entry>();
-      for (const o of orders) {
-        const r = o as {
-          customer_name?: string | null;
-          email?: string | null;
-          total?: number | null;
-          customer_id?: string | null;
-        };
-        const key = r.customer_id
-          ? `id:${r.customer_id}`
-          : r.email
-            ? `em:${String(r.email).toLowerCase()}`
-            : r.customer_name
-              ? `nm:${r.customer_name}`
-              : "guest:no-detail";
-        const label = String(r.customer_name?.trim() || r.email || "Guest");
-        const email = String(r.email || "");
-        const prev = agg.get(key);
-        const add = Number(r.total || 0);
-        if (prev) {
-          prev.revenue += add;
-          prev.orders += 1;
-          if (!prev.email && email) prev.email = email;
-        } else {
-          agg.set(key, { label, email, revenue: add, orders: 1 });
-        }
-      }
-      const rowsArr = [...agg.values()]
-        .map((v) => [v.label, v.email, v.orders, Number(v.revenue.toFixed(2))] as (string | number)[])
-        .sort((a, b) => Number(b[3]) - Number(a[3]));
+      const { data, error } = await (supabase as any).rpc("get_analytics_top_customers", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{
+        customer_label?: string | null;
+        customer_email?: string | null;
+        orders_count?: number | null;
+        revenue?: number | null;
+      }>;
       return {
         columns: ["Customer", "Email", "Orders", "Revenue"],
-        rows: rowsArr,
+        rows: rows.map((row) => [
+          String(row.customer_label ?? "Guest"),
+          String(row.customer_email ?? ""),
+          Number(row.orders_count ?? 0),
+          Number(row.revenue ?? 0),
+        ]),
       };
     }
 
     case "payment_status": {
       if (!viewerUserId) throw new Error("Missing viewer context for payment status report.");
-      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!);
-      const agg = new Map<string, { count: number; revenue: number }>();
-      for (const o of orders) {
-        const r = o as { financial_status?: string | null; total?: number | null };
-        const k = String(r.financial_status || "unknown");
-        const p = agg.get(k) || { count: 0, revenue: 0 };
-        p.count += 1;
-        p.revenue += Number(r.total || 0);
-        agg.set(k, p);
-      }
-      const sorted = [...agg.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+      const { data, error } = await (supabase as any).rpc("get_analytics_payment_status_breakdown", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{ payment_status?: string | null; orders_count?: number | null; revenue?: number | null }>;
       return {
         columns: ["Payment status", "Orders", "Revenue"],
-        rows: sorted.map(([k, v]) => [k, v.count, Number(v.revenue.toFixed(2))]),
+        rows: rows.map((row) => [
+          String(row.payment_status ?? "unknown"),
+          Number(row.orders_count ?? 0),
+          Number(row.revenue ?? 0),
+        ]),
       };
     }
 
     case "fulfillment_status": {
       if (!viewerUserId) throw new Error("Missing viewer context for fulfillment status report.");
-      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!);
-      const agg = new Map<string, { count: number; revenue: number }>();
-      for (const o of orders) {
-        const r = o as { fulfillment_status?: string | null; total?: number | null };
-        const k = String(r.fulfillment_status || "unknown");
-        const p = agg.get(k) || { count: 0, revenue: 0 };
-        p.count += 1;
-        p.revenue += Number(r.total || 0);
-        agg.set(k, p);
-      }
-      const sorted = [...agg.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+      const { data, error } = await (supabase as any).rpc("get_analytics_fulfillment_status_breakdown", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{
+        fulfillment_status?: string | null;
+        orders_count?: number | null;
+        revenue?: number | null;
+      }>;
       return {
         columns: ["Fulfillment", "Orders", "Revenue"],
-        rows: sorted.map(([k, v]) => [k, v.count, Number(v.revenue.toFixed(2))]),
+        rows: rows.map((row) => [
+          String(row.fulfillment_status ?? "unknown"),
+          Number(row.orders_count ?? 0),
+          Number(row.revenue ?? 0),
+        ]),
       };
     }
 
     case "tax_summary": {
       if (!viewerUserId) throw new Error("Missing viewer context for tax summary report.");
-      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!);
-      let subtotal = 0;
-      let tax = 0;
-      let total = 0;
-      const byCur = new Map<string, { sub: number; tx: number; tot: number }>();
-      for (const o of orders) {
-        const r = o as { subtotal?: number | null; total_tax?: number | null; total?: number | null; currency_code?: string | null };
-        const s = Number(r.subtotal || 0);
-        const t = Number(r.total_tax || 0);
-        const tot = Number(r.total || 0);
-        subtotal += s;
-        tax += t;
-        total += tot;
-        const c = String(r.currency_code || currency);
-        const p = byCur.get(c) || { sub: 0, tx: 0, tot: 0 };
-        p.sub += s;
-        p.tx += t;
-        p.tot += tot;
-        byCur.set(c, p);
-      }
-      const rows: (string | number)[][] = [
-        ["All currencies combined", "—", subtotal.toFixed(2), tax.toFixed(2), total.toFixed(2)],
-      ];
-      for (const [c, v] of byCur) {
-        rows.push([`Currency: ${c}`, c, v.sub.toFixed(2), v.tx.toFixed(2), v.tot.toFixed(2)]);
-      }
+      const { data, error } = await (supabase as any).rpc("get_analytics_tax_summary_rows", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{
+        breakdown?: string | null;
+        currency_code?: string | null;
+        subtotal?: number | null;
+        tax?: number | null;
+        total?: number | null;
+      }>;
       return {
         columns: ["Breakdown", "Currency code", "Subtotal", "Tax", "Total"],
-        rows,
+        rows: rows.map((row) => [
+          String(row.breakdown ?? ""),
+          String(row.currency_code ?? currency),
+          Number(row.subtotal ?? 0),
+          Number(row.tax ?? 0),
+          Number(row.total ?? 0),
+        ]),
       };
     }
 
     case "sales_by_salesperson": {
       if (!viewerUserId) throw new Error("Missing viewer context for sales by salesperson report.");
-      const orders = await paginateScopedOrdersInRange(viewerUserId, fromIso!, toIso!);
-      const customerIdByShopifyCustomerId = new Map<string, string>();
-      const allCustomers = await paginateScopedCustomers(viewerUserId, null, null);
-      for (const c of allCustomers ?? []) {
-        const row = c as { id: string; shopify_customer_id?: string | null };
-        if (row.shopify_customer_id) customerIdByShopifyCustomerId.set(row.shopify_customer_id, row.id);
-      }
-
-      const customerIds = new Set<string>();
-      for (const order of orders) {
-        const r = order as { customer_id?: string | null; shopify_customer_id?: string | null };
-        if (r.customer_id) customerIds.add(r.customer_id);
-        else if (r.shopify_customer_id) {
-          const mapped = customerIdByShopifyCustomerId.get(r.shopify_customer_id);
-          if (mapped) customerIds.add(mapped);
-        }
-      }
-
-      const salespeopleByCustomer = new Map<string, string[]>();
-      for (const part of chunk([...customerIds], 200)) {
-        if (!part.length) continue;
-        const { data, error } = await (supabase as any)
-          .from("v_salesperson_customer_attribution")
-          .select("customer_id, salesperson_name")
-          .in("customer_id", part);
-        if (error) throw error;
-        for (const row of data ?? []) {
-          const customerId = String((row as { customer_id: string }).customer_id);
-          const salespersonName = String((row as { salesperson_name: string }).salesperson_name || "Unknown");
-          const list = salespeopleByCustomer.get(customerId) || [];
-          list.push(salespersonName);
-          salespeopleByCustomer.set(customerId, list);
-        }
-      }
-
-      const agg = new Map<string, { orders: number; revenue: number }>();
-      for (const order of orders) {
-        const r = order as { customer_id?: string | null; shopify_customer_id?: string | null; total?: number | null };
-        const customerId = r.customer_id || (r.shopify_customer_id ? customerIdByShopifyCustomerId.get(r.shopify_customer_id) : undefined);
-        const names = customerId ? salespeopleByCustomer.get(customerId) : undefined;
-        const attributed = names?.length ? names : ["Unassigned"];
-        for (const name of attributed) {
-          const prev = agg.get(name) || { orders: 0, revenue: 0 };
-          prev.orders += 1;
-          prev.revenue += Number(r.total || 0);
-          agg.set(name, prev);
-        }
-      }
-
-      const sorted = [...agg.entries()].sort((a, b) => b[1].revenue - a[1].revenue);
+      const { data, error } = await (supabase as any).rpc("get_analytics_sales_by_salesperson", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso!,
+        _to_iso: toIso!,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{ salesperson_name?: string | null; orders_count?: number | null; revenue?: number | null }>;
       return {
         columns: ["Salesperson", "Orders", "Revenue"],
-        rows: sorted.map(([k, v]) => [k, v.orders, Number(v.revenue.toFixed(2))]),
+        rows: rows.map((row) => [
+          String(row.salesperson_name ?? "Unassigned"),
+          Number(row.orders_count ?? 0),
+          Number(row.revenue ?? 0),
+        ]),
       };
     }
 
@@ -548,7 +472,7 @@ export async function fetchReportData(
           .select("sku, title, price, stock, inventory_location, shopify_products(title, vendor)")
           .order("stock", { ascending: true })
           .range(offset, offset + PAGE - 1);
-        if (error) throw error;
+        if (error) throw asReportError(error);
         const batch = data ?? [];
         for (const v of batch) {
           const row = v as Record<string, unknown> & { shopify_products?: { title?: string; vendor?: string | null } };
@@ -579,7 +503,7 @@ export async function fetchReportData(
         .lte("stock", lowStockThreshold)
         .order("stock", { ascending: true })
         .limit(2000);
-      if (error) throw error;
+      if (error) throw asReportError(error);
       const rows = (data ?? []).map((v) => {
         const row = v as Record<string, unknown> & { shopify_products?: { title?: string; vendor?: string | null } };
         const p = row.shopify_products;
@@ -601,7 +525,7 @@ export async function fetchReportData(
     case "customer_directory": {
       if (!viewerUserId) throw new Error("Missing viewer context for customer directory.");
       const all: (string | number)[][] = [];
-      const customers = await paginateScopedCustomers(viewerUserId, null, null);
+      const customers = await paginateScopedCustomers(viewerUserId, null, null, maxRows);
       for (const c of customers) {
         const r = c as Record<string, unknown>;
         all.push([
@@ -625,67 +549,37 @@ export async function fetchReportData(
     case "supervisor_performance":
     case "team_performance": {
       if (!fromIso || !toIso) throw new Error("Select a date range for this report.");
-      let query = (supabase as any)
-        .from("v_user_scope_performance")
-        .select("viewer_user_id, viewer_role, team_member_count");
-
-      // Push role filtering to SQL to avoid heavy full-view scans.
-      if (reportId === "manager_performance") {
-        query = query.eq("viewer_role", "manager");
-      } else if (reportId === "supervisor_performance") {
-        query = query.eq("viewer_role", "supervisor");
-      }
-
-      const { data, error } = await query.order("team_revenue", { ascending: false });
-      if (error) throw error;
-
-      const rows = (data ?? []) as Record<string, unknown>[];
-      const viewerIds = Array.from(
-        new Set(rows.map((row) => String(row.viewer_user_id ?? "")).filter(Boolean)),
-      );
-      const [nameByUserId, scopedMetricsByViewer] = await Promise.all([
-        getUserNameMap(viewerUserId, viewerIds),
-        Promise.all(
-          rows.map(async (row) => {
-            const viewerId = String(row.viewer_user_id ?? "");
-            if (!viewerId) {
-              return { viewerId, metrics: { customers_count: 0, orders_count: 0, revenue: 0 } };
-            }
-            const { data: metricData, error: metricError } = await supabase.rpc("get_scope_order_metrics", {
-              _viewer_user_id: viewerId,
-              _from_iso: fromIso,
-              _to_iso: toIso,
-            });
-            if (metricError) throw metricError;
-            const metricRow = (metricData?.[0] ?? {}) as {
-              customers_count?: number;
-              orders_count?: number;
-              revenue?: number;
-            };
-            return {
-              viewerId,
-              metrics: {
-                customers_count: Number(metricRow.customers_count ?? 0),
-                orders_count: Number(metricRow.orders_count ?? 0),
-                revenue: Number(metricRow.revenue ?? 0),
-              },
-            };
-          }),
-        ),
-      ]);
-      const metricsByViewer = new Map(
-        scopedMetricsByViewer.map((entry) => [entry.viewerId, entry.metrics]),
-      );
-
+      if (!viewerUserId) throw new Error("Missing viewer context for team performance report.");
+      const roleFilter =
+        reportId === "manager_performance"
+          ? "manager"
+          : reportId === "supervisor_performance"
+            ? "supervisor"
+            : "all";
+      const { data, error } = await (supabase as any).rpc("get_analytics_scope_performance_rows", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso,
+        _to_iso: toIso,
+        _role_filter: roleFilter,
+      });
+      if (error) throw asReportError(error);
+      const rows = (data ?? []) as Array<{
+        viewer_name?: string | null;
+        viewer_role?: string | null;
+        team_member_count?: number | null;
+        team_customers_count?: number | null;
+        team_orders_count?: number | null;
+        team_revenue?: number | null;
+      }>;
       return {
         columns: ["Name", "Role", "Team members", "Team customers", "Team orders", "Team revenue"],
         rows: rows.map((row) => [
-          nameByUserId.get(String(row.viewer_user_id ?? "")) || String(row.viewer_user_id ?? ""),
+          String(row.viewer_name ?? ""),
           String(row.viewer_role ?? ""),
           Number(row.team_member_count ?? 0),
-          Number(metricsByViewer.get(String(row.viewer_user_id ?? ""))?.customers_count ?? 0),
-          Number(metricsByViewer.get(String(row.viewer_user_id ?? ""))?.orders_count ?? 0),
-          Number(metricsByViewer.get(String(row.viewer_user_id ?? ""))?.revenue ?? 0),
+          Number(row.team_customers_count ?? 0),
+          Number(row.team_orders_count ?? 0),
+          Number(row.team_revenue ?? 0),
         ]),
       };
     }

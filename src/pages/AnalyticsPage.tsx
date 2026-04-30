@@ -10,7 +10,7 @@ import { PoundSterling, ShoppingCart, Users, TrendingUp, FileDown, FileText, Lay
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useScopeOrderTimeseries,
-  useScopeOrderMetrics,
+  useScopeFinancialBreakdown,
 } from "@/hooks/use-shopify-data";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { differenceInCalendarDays } from "date-fns";
@@ -70,6 +70,18 @@ function getDisplayCurrencyLabel(currencyCode: string): string {
 
 function isMonetaryMetricLabel(metricLabel: string): boolean {
   return /(revenue|tax|subtotal|total|avg|average|aov|order value)/i.test(metricLabel);
+}
+
+function getReadableErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const e = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const message = [e.message, e.details, e.hint, e.code]
+      .filter((v) => typeof v === "string" && v.trim().length > 0)
+      .join(" | ");
+    if (message) return message;
+  }
+  return fallback;
 }
 
 function formatReportCell(
@@ -175,7 +187,7 @@ export default function AnalyticsPage() {
   const bucket = rangeDays <= 62 ? "day" : "month";
 
   const scopeKey = "analytics";
-  const { data: metrics, isLoading: loadingMetrics } = useScopeOrderMetrics(
+  const { data: metrics, isLoading: loadingMetrics } = useScopeFinancialBreakdown(
     user?.id,
     fromIso,
     toIso,
@@ -190,10 +202,10 @@ export default function AnalyticsPage() {
     Boolean(user?.id),
   );
 
-  const revenue = metrics?.revenue ?? 0;
-  const orders = metrics?.orders_count ?? 0;
-  const custCount = metrics?.customers_count ?? 0;
-  const aov = metrics?.avg_order_value ?? 0;
+  const grossRevenue = metrics?.gross_revenue ?? 0;
+  const netRevenue = metrics?.net_revenue ?? 0;
+  const refundedAmount = metrics?.refunded_amount ?? 0;
+  const orders = metrics?.orders_total_count ?? 0;
   const chartSeries = useMemo(() => series.map((point) => ({ ...point })), [series]);
   const chartRenderKey = useMemo(() => {
     const totals = chartSeries.reduce(
@@ -252,6 +264,7 @@ export default function AnalyticsPage() {
       currency,
       viewerUserId: user?.id,
       lowStockThreshold,
+      maxRows: PREVIEW_ROW_CAP,
     })
       .then((data) => {
         if (!cancelled) setPreview(data);
@@ -259,7 +272,7 @@ export default function AnalyticsPage() {
       .catch((e) => {
         if (!cancelled) {
           setPreview(null);
-          toast.error(e instanceof Error ? e.message : "Could not load report");
+          toast.error(getReadableErrorMessage(e, "Could not load report"));
         }
       })
       .finally(() => {
@@ -320,7 +333,7 @@ export default function AnalyticsPage() {
       URL.revokeObjectURL(a.href);
       toast.success("CSV downloaded");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Export failed");
+      toast.error(getReadableErrorMessage(e, "Export failed"));
     } finally {
       setExporting(null);
     }
@@ -394,7 +407,7 @@ export default function AnalyticsPage() {
       doc.save(`${reportFileSlug(selectedReportId)}-${new Date().toISOString().slice(0, 10)}.pdf`);
       toast.success("PDF downloaded");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "PDF export failed");
+      toast.error(getReadableErrorMessage(e, "PDF export failed"));
     } finally {
       setExporting(null);
     }
@@ -478,27 +491,27 @@ export default function AnalyticsPage() {
         <TabsContent value="overview" className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <KpiCard
-              title="Revenue"
-              value={loadingMetrics ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(revenue, null, currency)}
+              title="Gross revenue"
+              value={loadingMetrics ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(grossRevenue, null, currency)}
               icon={PoundSterling}
               delay={50}
             />
             <KpiCard
-              title="Orders"
-              value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(orders)}
-              icon={ShoppingCart}
+              title="Net revenue"
+              value={loadingMetrics ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(netRevenue, null, currency)}
+              icon={TrendingUp}
               delay={100}
             />
             <KpiCard
-              title="New customers"
-              value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(custCount)}
-              icon={Users}
+              title="Refunded amount"
+              value={loadingMetrics ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(refundedAmount, null, currency)}
+              icon={PoundSterling}
               delay={150}
             />
             <KpiCard
-              title="Avg. order"
-              value={loadingMetrics ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(aov, null, currency)}
-              icon={TrendingUp}
+              title="Total orders"
+              value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(orders)}
+              icon={ShoppingCart}
               delay={200}
             />
           </div>

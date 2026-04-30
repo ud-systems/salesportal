@@ -109,12 +109,37 @@ async function upsertSalespersonAssignments(
     }
   }
   const seen = new Set<string>();
+  const targetSalespersonIds: string[] = [];
   for (const row of payloads) {
     if (seen.has(row.salesperson_user_id)) continue;
     seen.add(row.salesperson_user_id);
+    targetSalespersonIds.push(row.salesperson_user_id);
     await supabase.from("salesperson_customer_assignments").upsert(row, {
       onConflict: "customer_id,salesperson_user_id",
     });
+  }
+
+  const { data: existingRows, error: existingErr } = await supabase
+    .from("salesperson_customer_assignments")
+    .select("id, salesperson_user_id")
+    .eq("customer_id", customerUuid)
+    .in("source", ["sp_assigned", "referred_by"]);
+  if (existingErr) {
+    devError("salesperson_customer_assignments read for prune:", existingErr.message, { customerUuid });
+    return;
+  }
+
+  const staleAssignmentIds = (existingRows || [])
+    .filter((row) => !targetSalespersonIds.includes((row as { salesperson_user_id: string }).salesperson_user_id))
+    .map((row) => (row as { id: string }).id);
+  if (staleAssignmentIds.length > 0) {
+    const { error: deleteErr } = await supabase
+      .from("salesperson_customer_assignments")
+      .delete()
+      .in("id", staleAssignmentIds);
+    if (deleteErr) {
+      devError("salesperson_customer_assignments stale prune:", deleteErr.message, { customerUuid, staleAssignmentIds });
+    }
   }
 }
 

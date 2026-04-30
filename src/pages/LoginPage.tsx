@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LogIn, AlertCircle, Loader2, Eye, EyeOff } from "lucide-react";
@@ -86,6 +86,14 @@ export default function LoginPage() {
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
+            </div>
+            <div className="flex justify-end">
+              <Link
+                to="/reset-password"
+                className="text-xs font-body text-primary hover:underline underline-offset-4"
+              >
+                Forgot password?
+              </Link>
             </div>
           </div>
           <Button type="submit" disabled={submitting} className="w-full h-11 rounded-xl font-body font-medium tap-scale gap-2">

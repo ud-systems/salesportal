@@ -4,9 +4,10 @@ import { KpiCard } from "@/components/KpiCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  useAggregateScopeMetricsForViewers,
+  useAggregateFinancialBreakdownForViewers,
+  useDirectReportSalesPerformance,
+  useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
-  useScopeOrderMetrics,
   useSupervisorSelectedManagerTimeseries,
   useSupervisorManagerScopePerformance,
   useSupervisorSalespersonOptions,
@@ -141,7 +142,7 @@ export default function SupervisorDashboardPage() {
         : managerSalespersonOptions,
     [selectedManagerId, salespersonOptions, managerSalespersonOptions],
   );
-  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(
+  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeFinancialBreakdown(
     user?.id,
     fromIso,
     toIso,
@@ -169,7 +170,7 @@ export default function SupervisorDashboardPage() {
   }, [scopeMode, selectedSalespersonId, filteredSalespersonOptions]);
   const isSalespersonDrilldown = (scopeMode === "salesperson" || scopeMode === "manager_team") && selectedSalespersonId !== "all";
   const drilledSalespersonId = isSalespersonDrilldown ? selectedSalespersonId : undefined;
-  const { data: aggregatedScopedMetrics, isLoading: loadingAggregatedScopedMetrics } = useAggregateScopeMetricsForViewers(
+  const { data: aggregatedScopedMetrics, isLoading: loadingAggregatedScopedMetrics } = useAggregateFinancialBreakdownForViewers(
     selectedViewerIds,
     fromIso,
     toIso,
@@ -184,7 +185,7 @@ export default function SupervisorDashboardPage() {
     scopeKey,
     scopeMode === "salesperson" || isSalespersonDrilldown,
   );
-  const { data: drilledSalespersonMetrics, isLoading: loadingDrilledSalespersonMetrics } = useScopeOrderMetrics(
+  const { data: drilledSalespersonMetrics, isLoading: loadingDrilledSalespersonMetrics } = useScopeFinancialBreakdown(
     drilledSalespersonId,
     fromIso,
     toIso,
@@ -207,20 +208,14 @@ export default function SupervisorDashboardPage() {
     scopeKey,
     scopeMode !== "all",
   );
+  const { data: selectedManagerTeamRows = [], isLoading: loadingSelectedManagerTeamRows } = useDirectReportSalesPerformance(
+    selectedManagerId !== "all" ? selectedManagerId : undefined,
+    "manager",
+    `${scopeKey}-selected-manager-team`,
+    fromIso,
+    toIso,
+  );
 
-  const scopedMetricsFromSeries = useMemo(() => {
-    if (scopeMode === "all") return null;
-    if (!selectedManagerSeries.length) return null;
-    const revenue = selectedManagerSeries.reduce((sum, point) => sum + Number(point.revenue || 0), 0);
-    const ordersCount = selectedManagerSeries.reduce((sum, point) => sum + Number(point.orders || 0), 0);
-    const customersCount = Number(aggregatedScopedMetrics?.customers_count || 0);
-    return {
-      orders_count: ordersCount,
-      customers_count: customersCount,
-      revenue,
-      avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
-    };
-  }, [scopeMode, selectedManagerSeries, aggregatedScopedMetrics?.customers_count]);
   const metrics =
     scopeMode === "all"
       ? allMetrics
@@ -228,7 +223,7 @@ export default function SupervisorDashboardPage() {
         ? drilledSalespersonMetrics
         : scopeMode === "salesperson"
         ? salespersonScopedData
-        : scopedMetricsFromSeries ?? aggregatedScopedMetrics;
+        : aggregatedScopedMetrics;
   const series =
     scopeMode === "all"
       ? allSeries
@@ -268,6 +263,14 @@ export default function SupervisorDashboardPage() {
     if (quickScopedIds) rows = rows.filter((row) => quickScopedIds.has(row.viewer_user_id));
     return rows;
   }, [scopeMode, selectedManagerId, typedRows, user?.id, quickScopedIds]);
+  const selectedManagerScorecard = useMemo(
+    () => typedRows.find((row) => row.viewer_user_id === selectedManagerId),
+    [typedRows, selectedManagerId],
+  );
+  const filteredSelectedManagerTeamRows = useMemo(() => {
+    if (selectedSalespersonId === "all") return selectedManagerTeamRows;
+    return selectedManagerTeamRows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
+  }, [selectedManagerTeamRows, selectedSalespersonId]);
   useEffect(() => {
     if (selectedSalespersonId === "all") return;
     if (filteredSalespersonOptions.some((s) => s.user_id === selectedSalespersonId)) return;
@@ -385,20 +388,20 @@ export default function SupervisorDashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
             <p className="text-xs text-muted-foreground font-body">Selected Scope Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.revenue || 0, null, currency)}</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.gross_revenue || 0, null, currency)}</p>
           </div>
           <div className="card-float p-4">
             <p className="text-xs text-muted-foreground font-body">Full Scope Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.revenue || 0, null, currency)}</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.gross_revenue || 0, null, currency)}</p>
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Org Revenue (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={PoundSterling} info="Current scope revenue from order totals for selected period." delay={50} />
-        <KpiCard title="Org Orders (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_count || 0)} icon={ShoppingCart} info="Current scope order count for selected period." delay={100} />
-        <KpiCard title="Org Customers (Scope)" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.customers_count || 0)} icon={Users} info="Current scope customer count for selected period." delay={150} />
-        <KpiCard title="Avg Order" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.avg_order_value || 0, null, currency)} icon={TrendingUp} info="Revenue divided by order count for the selected scope." delay={200} />
+        <KpiCard title="Gross Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.gross_revenue || 0, null, currency)} icon={PoundSterling} info="Sum of all in-scope order totals (excluding test orders)." delay={50} />
+        <KpiCard title="Net Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.net_revenue || 0, null, currency)} icon={TrendingUp} info="Gross revenue minus refunded and voided order totals." delay={100} />
+        <KpiCard title="Refunded Amount" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.refunded_amount || 0, null, currency)} icon={PoundSterling} info="Order totals classified as refunded, partially refunded, or voided." delay={150} />
+        <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
@@ -455,7 +458,7 @@ export default function SupervisorDashboardPage() {
                 <tr className="border-b text-muted-foreground">
                   <th className="text-left py-2.5 font-medium">Manager</th>
                   <th className="text-right py-2.5 font-medium">Team members</th>
-                  <th className="text-right py-2.5 font-medium">Customers</th>
+                  <th className="text-right py-2.5 font-medium">Registered Customers</th>
                   <th className="text-right py-2.5 font-medium">Orders</th>
                   <th className="text-right py-2.5 font-medium">Revenue</th>
                 </tr>
@@ -472,6 +475,66 @@ export default function SupervisorDashboardPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {scopeMode === "manager_team" && selectedManagerId !== "all" && (
+          <div className="mt-5 space-y-3">
+            {selectedManagerScorecard && (
+              <div className="rounded-xl border bg-card p-4">
+                <p className="text-sm font-semibold text-foreground">{selectedManagerScorecard.manager_name}</p>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <div className="rounded-lg bg-muted/50 p-2">
+                    <p className="text-muted-foreground">Team members</p>
+                    <p className="font-semibold text-foreground">{selectedManagerScorecard.team_member_count}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-2">
+                    <p className="text-muted-foreground">Registered Customers</p>
+                    <p className="font-semibold text-foreground">{selectedManagerScorecard.team_customers_count}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-2">
+                    <p className="text-muted-foreground">Orders</p>
+                    <p className="font-semibold text-foreground">{selectedManagerScorecard.team_orders_count}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-2">
+                    <p className="text-muted-foreground">Revenue</p>
+                    <p className="font-semibold text-foreground">{formatOrderMoney(selectedManagerScorecard.team_revenue, null, currency)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {loadingSelectedManagerTeamRows ? (
+              <div className="space-y-2">
+                <Skeleton className="h-9 w-full rounded-lg" />
+                <Skeleton className="h-9 w-full rounded-lg" />
+              </div>
+            ) : filteredSelectedManagerTeamRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground font-body">
+                No team member rows found for the selected manager in this period.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border">
+                <table className="w-full text-sm font-body">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="text-left py-2.5 px-3 font-medium">Salesperson</th>
+                      <th className="text-right py-2.5 px-3 font-medium">Registered Customers</th>
+                      <th className="text-right py-2.5 px-3 font-medium">Orders</th>
+                      <th className="text-right py-2.5 px-3 font-medium">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSelectedManagerTeamRows.map((row) => (
+                      <tr key={row.salesperson_user_id} className="border-b last:border-0">
+                        <td className="py-3 px-3">{row.salesperson_name}</td>
+                        <td className="py-3 px-3 text-right">{row.customers_count}</td>
+                        <td className="py-3 px-3 text-right">{row.orders_count}</td>
+                        <td className="py-3 px-3 text-right">{formatOrderMoney(row.revenue, null, currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>

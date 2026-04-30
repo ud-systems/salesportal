@@ -4,6 +4,7 @@ import {
   useCustomerRecentOrders,
   useCustomerCities,
   useCustomersPaginated,
+  useManagerTeamMemberOptions,
   useOrderItems,
   useSalespeopleUnderManagers,
   useSupervisorManagerOptions,
@@ -33,8 +34,9 @@ import { useNavigate } from "react-router-dom";
 
 export default function CustomersPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
-  const { user, isAdmin, isSupervisor } = useAuth();
+  const { user, isAdmin, isSupervisor, isManager } = useAuth();
   const navigate = useNavigate();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [assignmentFilter, setAssignmentFilter] = useState("all");
@@ -62,6 +64,7 @@ export default function CustomersPage() {
   const toYmd = toLocalYmd(range.to);
   const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, "customers-page");
   const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, "customers-page");
+  const { data: managerTeamOptions = [] } = useManagerTeamMemberOptions(user?.id, "customers-page");
   const { data: managerSalespeople = [] } = useSalespeopleUnderManagers(
     selectedManagerId !== "all" ? [selectedManagerId] : [],
     "customers-page",
@@ -123,14 +126,37 @@ export default function CustomersPage() {
     return Array.from(new Set([...managerOptions.map((m) => m.label), ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean)));
   }, [isSupervisor, scopeMode, user?.salesperson_name, selectedSalespersonId, selectedManagerId, filteredSalespersonOptions, managerLabelById, managerOptions]);
   const shouldApplyExplicitScopeFilters = useMemo(() => {
-    if (!isSupervisor) return false;
-    if (scopeMode === "mine") return true;
-    if (scopeMode === "manager_team") {
-      return selectedManagerId !== "all" || selectedSalespersonId !== "all";
+    if (isSupervisor) {
+      if (scopeMode === "mine") return true;
+      if (scopeMode === "manager_team") {
+        return selectedManagerId !== "all" || selectedSalespersonId !== "all";
+      }
+      return false;
     }
+    if (!isAdmin) return true;
     return false;
-  }, [isSupervisor, scopeMode, selectedManagerId, selectedSalespersonId]);
+  }, [isSupervisor, isAdmin, scopeMode, selectedManagerId, selectedSalespersonId]);
+  const managerScopeSalespersonIds = useMemo(
+    () => Array.from(new Set([user?.id, ...managerTeamOptions.map((sp) => sp.user_id)].filter(Boolean) as string[])),
+    [managerTeamOptions, user?.id],
+  );
+  const finalScopedSalespersonIds = useMemo(() => {
+    if (isSupervisor) return scopedSalespersonIds;
+    if (isManager) return managerScopeSalespersonIds;
+    if (!isAdmin) return user?.id ? [user.id] : [];
+    return [];
+  }, [isSupervisor, isManager, isAdmin, scopedSalespersonIds, managerScopeSalespersonIds, user?.id]);
+  const finalScopedOwnerNames = useMemo(() => {
+    if (isSupervisor) return scopedOwnerNames;
+    if (!isAdmin && user?.salesperson_name) return [user.salesperson_name];
+    return [];
+  }, [isSupervisor, isAdmin, scopedOwnerNames, user?.salesperson_name]);
   const isScopeCustomersReady = true;
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => window.clearTimeout(id);
+  }, [searchInput]);
 
   useEffect(() => {
     const saved = loadUserFilterPreset(user?.id, "customers-page", {
@@ -147,6 +173,7 @@ export default function CustomersPage() {
       selectedManagerId: "all",
       selectedSalespersonId: "all",
     });
+    setSearchInput(saved.search);
     setSearch(saved.search);
     setCityFilter(saved.cityFilter);
     setAssignmentFilter(saved.assignmentFilter);
@@ -197,8 +224,8 @@ export default function CustomersPage() {
     toDate: toYmd,
     sortBy,
     sortDir,
-    scopeSalespersonIds: shouldApplyExplicitScopeFilters ? scopedSalespersonIds : undefined,
-    scopeOwnerNames: shouldApplyExplicitScopeFilters ? scopedOwnerNames : undefined,
+    scopeSalespersonIds: shouldApplyExplicitScopeFilters ? finalScopedSalespersonIds : undefined,
+    scopeOwnerNames: shouldApplyExplicitScopeFilters ? finalScopedOwnerNames : undefined,
     forceScopedFilter: shouldApplyExplicitScopeFilters,
     enabled: isScopeCustomersReady,
   });
@@ -267,7 +294,7 @@ export default function CustomersPage() {
       <div className="flex gap-3 opacity-0 animate-fade-in" style={{ animationDelay: "50ms" }}>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search customers..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 rounded-xl h-10 font-body border-border" />
+          <Input placeholder="Search customers..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} className="pl-9 rounded-xl h-10 font-body border-border" />
         </div>
         <button onClick={() => setFilterOpen(true)} className="h-10 px-4 rounded-xl border bg-card font-body text-sm text-muted-foreground hover:bg-muted transition-colors tap-scale lg:hidden">Filter</button>
       </div>

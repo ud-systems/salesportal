@@ -36,6 +36,7 @@ export default function OrdersPage() {
     if (val && ["all", "fulfilled", "partial", "unfulfilled", "on_hold"].includes(val)) return val;
     return "all";
   })();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [fulfillmentFilter, setFulfillmentFilter] = useState(initialFulfillment);
@@ -172,7 +173,24 @@ export default function OrdersPage() {
     }
     return false;
   }, [isLeader, isSupervisor, isManager, scopeMode]);
+  const finalScopedSalespersonIds = useMemo(() => {
+    if (isLeader) return scopedSalespersonIds;
+    return user?.id ? [user.id] : [];
+  }, [isLeader, scopedSalespersonIds, user?.id]);
+  const finalScopedOwnerNames = useMemo(() => {
+    if (isLeader) return scopedOwnerNames;
+    return user?.salesperson_name ? [user.salesperson_name] : [];
+  }, [isLeader, scopedOwnerNames, user?.salesperson_name]);
+  const finalShouldApplyScopeFilters = useMemo(() => {
+    if (isLeader) return shouldApplyExplicitScopeFilters;
+    return true;
+  }, [isLeader, shouldApplyExplicitScopeFilters]);
   const isScopeCustomersReady = true;
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => window.clearTimeout(id);
+  }, [searchInput]);
 
   useEffect(() => {
     const saved = loadUserFilterPreset(user?.id, "orders-page", {
@@ -189,6 +207,7 @@ export default function OrdersPage() {
       selectedManagerId: "all",
       selectedSalespersonId: "all",
     });
+    setSearchInput(saved.search);
     setSearch(saved.search);
     setStatusFilter(saved.statusFilter);
     setFulfillmentFilter(saved.fulfillmentFilter);
@@ -234,9 +253,9 @@ export default function OrdersPage() {
     toDate: toYmd,
     sortBy,
     sortDir,
-    scopeSalespersonIds: shouldApplyExplicitScopeFilters ? scopedSalespersonIds : undefined,
-    scopeOwnerNames: shouldApplyExplicitScopeFilters ? scopedOwnerNames : undefined,
-    forceScopedFilter: shouldApplyExplicitScopeFilters,
+    scopeSalespersonIds: finalShouldApplyScopeFilters ? finalScopedSalespersonIds : undefined,
+    scopeOwnerNames: finalShouldApplyScopeFilters ? finalScopedOwnerNames : undefined,
+    forceScopedFilter: finalShouldApplyScopeFilters,
     enabled: isScopeCustomersReady,
   });
   const isOrdersLoading = isLoading || !isScopeCustomersReady;
@@ -283,7 +302,7 @@ export default function OrdersPage() {
       <div className="flex gap-3 opacity-0 animate-fade-in" style={{ animationDelay: "50ms" }}>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search orders..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 rounded-xl h-10 font-body border-border" />
+          <Input placeholder="Search orders..." value={searchInput} onChange={(e) => setSearchInput(e.target.value)} className="pl-9 rounded-xl h-10 font-body border-border" />
         </div>
         <button onClick={() => setFilterOpen(true)} className="h-10 px-4 rounded-xl border bg-card font-body text-sm text-muted-foreground hover:bg-muted transition-colors tap-scale lg:hidden">Filter</button>
       </div>
@@ -498,7 +517,12 @@ export default function OrdersPage() {
 
           <div className="relative md:hidden space-y-3">
             {ordersVisible.map((o, i) => (
-              <div key={o.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
+              <div
+                key={o.id}
+                onClick={() => setSelectedOrder(o)}
+                className="card-float p-4 tap-scale opacity-0 animate-fade-in cursor-pointer"
+                style={{ animationDelay: `${100 + i * 50}ms` }}
+              >
                 <div className="flex items-start justify-between mb-2">
                   <div><p className="font-medium text-foreground text-sm">{o.order_number || o.shopify_order_id}</p><p className="text-xs text-muted-foreground mt-0.5">{o.customer_name}</p></div>
                   <p className="font-heading font-bold text-foreground">

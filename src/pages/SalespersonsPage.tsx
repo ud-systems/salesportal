@@ -9,6 +9,7 @@ import { getDashboardRange, toLocalYmd, toRangeIso, type DatePreset } from "@/li
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useAuth } from "@/contexts/AuthContext";
 
 function initials(name: string) {
   return name
@@ -19,6 +20,7 @@ function initials(name: string) {
 }
 
 export default function SalespersonsPage() {
+  const { user, isSupervisor, isManager } = useAuth();
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [preset, setPreset] = useState<DatePreset>("all");
   const [customFrom, setCustomFrom] = useState("");
@@ -33,10 +35,14 @@ export default function SalespersonsPage() {
   const fromYmd = toLocalYmd(range.from);
   const toYmd = toLocalYmd(range.to);
   const [selectedSalesperson, setSelectedSalesperson] = useState<{ id: string; name: string } | null>(null);
+  const leaderRole: "manager" | "supervisor" | null = isSupervisor ? "supervisor" : isManager ? "manager" : null;
+  const leaderUserId = leaderRole ? user?.id ?? null : null;
   const { data: salespersons = [], isLoading } = useSalespersonFinancialBreakdown(
-    "admin",
+    "salespersons-page",
     isAll ? null : fromIso,
     isAll ? null : toIso,
+    leaderUserId,
+    leaderRole,
   );
 
   const rows = useMemo(
@@ -141,7 +147,7 @@ export default function SalespersonsPage() {
                 <thead>
                   <tr className="border-b text-muted-foreground">
                     <th className="text-left py-2.5 font-medium">Salesperson</th>
-                    <th className="text-right py-2.5 font-medium">Customers</th>
+                    <th className="text-right py-2.5 font-medium">Registered Customers</th>
                     <th className="text-right py-2.5 font-medium">Orders</th>
                     <th className="text-right py-2.5 font-medium">Paid</th>
                     <th className="text-right py-2.5 font-medium">Refunded</th>
@@ -200,7 +206,7 @@ export default function SalespersonsPage() {
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <Users className="h-4 w-4 text-primary mx-auto mb-1" />
                     <p className="text-lg font-heading font-bold text-foreground">{sp.customers}</p>
-                    <p className="text-[10px] text-muted-foreground font-body">Customers</p>
+                    <p className="text-[10px] text-muted-foreground font-body">Registered Customers</p>
                   </div>
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <Users className="h-4 w-4 text-primary mx-auto mb-1" />
@@ -230,7 +236,7 @@ export default function SalespersonsPage() {
           <div className="mt-4 space-y-4 font-body text-sm">
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl border p-3">
-                <p className="text-xs text-muted-foreground">Customers in period</p>
+                <p className="text-xs text-muted-foreground">Registered customers in period</p>
                 <p className="text-lg font-heading font-bold text-foreground">{selectedCustomersCount}</p>
               </div>
               <div className="rounded-xl border p-3">
@@ -240,7 +246,7 @@ export default function SalespersonsPage() {
             </div>
 
             <div className="rounded-xl border p-4">
-              <p className="text-sm font-semibold text-foreground mb-3">Customers added in selected period</p>
+              <p className="text-sm font-semibold text-foreground mb-3">Registered customers added in selected period</p>
               {loadingSelectedCustomers ? (
                 <div className="space-y-2">
                   <Skeleton className="h-10 w-full rounded-lg" />

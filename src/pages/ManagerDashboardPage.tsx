@@ -7,9 +7,9 @@ import {
   useDirectReportSalesPerformance,
   useManagerSelectedSalespeopleTimeseries,
   useManagerTeamMemberOptions,
+  useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
   useSalespeopleScopedMetricsAndSeries,
-  useScopeOrderMetrics,
 } from "@/hooks/use-shopify-data";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { formatOrderMoney } from "@/lib/format";
@@ -98,7 +98,7 @@ export default function ManagerDashboardPage() {
     fromIso,
     toIso,
   );
-  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeOrderMetrics(
+  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeFinancialBreakdown(
     user?.id,
     fromIso,
     toIso,
@@ -138,21 +138,7 @@ export default function ManagerDashboardPage() {
     scopeMode !== "team",
   );
 
-  const scopedMetricsFromSeries = useMemo(() => {
-    if (scopeMode === "team") return null;
-    if (!selectedSeries.length) return null;
-    const revenue = selectedSeries.reduce((sum, point) => sum + Number(point.revenue || 0), 0);
-    const ordersCount = selectedSeries.reduce((sum, point) => sum + Number(point.orders || 0), 0);
-    const customersCount = Number(scopedData?.customers_count || 0);
-    return {
-      orders_count: ordersCount,
-      customers_count: customersCount,
-      revenue,
-      avg_order_value: ordersCount > 0 ? revenue / ordersCount : 0,
-    };
-  }, [scopeMode, selectedSeries, scopedData?.customers_count]);
-
-  const metrics = scopeMode === "team" ? allMetrics : scopedMetricsFromSeries ?? scopedData;
+  const metrics = scopeMode === "team" ? allMetrics : scopedData;
   const series = scopeMode === "team" ? allSeries : (selectedSeries.length ? selectedSeries : scopedData?.series ?? []);
   const loadingMetrics = scopeMode === "team" ? loadingAllMetrics : loadingScopedData || loadingSelectedSeries;
   const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
@@ -266,20 +252,20 @@ export default function ManagerDashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
             <p className="text-xs text-muted-foreground font-body">Selected Scope Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.revenue || 0, null, currency)}</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.gross_revenue || 0, null, currency)}</p>
           </div>
           <div className="card-float p-4">
             <p className="text-xs text-muted-foreground font-body">Full Team Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.revenue || 0, null, currency)}</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.gross_revenue || 0, null, currency)}</p>
           </div>
         </div>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Team Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.revenue || 0, null, currency)} icon={PoundSterling} info="Current scope revenue from order totals for selected period." delay={50} />
-        <KpiCard title="Team Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_count || 0)} icon={ShoppingCart} info="Current scope order count for selected period." delay={100} />
-        <KpiCard title="Team Customers" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.customers_count || 0)} icon={Users} info="Current scope customer count for selected period." delay={150} />
-        <KpiCard title="Avg Order" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.avg_order_value || 0, null, currency)} icon={TrendingUp} info="Revenue divided by order count for the selected scope." delay={200} />
+        <KpiCard title="Gross Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.gross_revenue || 0, null, currency)} icon={PoundSterling} info="Sum of all in-scope order totals (excluding test orders)." delay={50} />
+        <KpiCard title="Net Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.net_revenue || 0, null, currency)} icon={TrendingUp} info="Gross revenue minus refunded and voided order totals." delay={100} />
+        <KpiCard title="Refunded Amount" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.refunded_amount || 0, null, currency)} icon={PoundSterling} info="Order totals classified as refunded, partially refunded, or voided." delay={150} />
+        <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
@@ -318,7 +304,7 @@ export default function ManagerDashboardPage() {
               <thead>
                 <tr className="border-b text-muted-foreground">
                   <th className="text-left py-2.5 font-medium">Salesperson</th>
-                  <th className="text-right py-2.5 font-medium">Customers</th>
+                  <th className="text-right py-2.5 font-medium">Registered Customers</th>
                   <th className="text-right py-2.5 font-medium">Orders</th>
                   <th className="text-right py-2.5 font-medium">Revenue</th>
                 </tr>
