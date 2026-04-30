@@ -386,7 +386,11 @@ Deno.serve(async (req) => {
       }, { onConflict: "shopify_customer_id" });
 
       const { data: row } = await supabase.from("shopify_customers").select("id").eq("shopify_customer_id", shopifyId).maybeSingle();
-      if (row?.id) await upsertSalespersonAssignments(supabase, row.id, spAssigned, referredBy, salespeople);
+      if (row?.id) {
+        await upsertSalespersonAssignments(supabase, row.id, spAssigned, referredBy, salespeople);
+        const { error: rfmErr } = await supabase.rpc("refresh_customer_rfm_metrics", { _customer_ids: [row.id] });
+        if (rfmErr) devError("refresh_customer_rfm_metrics customer:", rfmErr.message, { customerId: row.id });
+      }
       return row?.id || null;
     };
 
@@ -495,6 +499,10 @@ Deno.serve(async (req) => {
         };
       });
       if (lineItems.length > 0) await supabase.from("shopify_order_items").insert(lineItems);
+      if (customerUuid) {
+        const { error: rfmErr } = await supabase.rpc("refresh_customer_rfm_metrics", { _customer_ids: [customerUuid] });
+        if (rfmErr) devError("refresh_customer_rfm_metrics order:", rfmErr.message, { customerId: customerUuid, orderId });
+      }
       return orderId;
     };
 

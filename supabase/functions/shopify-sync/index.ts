@@ -304,6 +304,7 @@ Deno.serve(async (req) => {
   if (shouldRun("customers")) {
   let customersLogId: string | null = null;
   let customersPartialCount = 0;
+  const rfmRefreshCustomerIds = new Set<string>();
   try {
     customersLogId = crypto.randomUUID();
     await supabase.from("sync_logs").insert({ id: customersLogId, sync_type: "customers", status: "running" });
@@ -510,6 +511,7 @@ Deno.serve(async (req) => {
         if (custLinkErr) throw custLinkErr;
         for (const link of custLinks || []) {
           const row = link as { id: string; sp_assigned: string | null; referred_by: string | null };
+          rfmRefreshCustomerIds.add(row.id);
           await upsertSalespersonAssignments(
             supabase,
             row.id,
@@ -539,6 +541,12 @@ Deno.serve(async (req) => {
     ].filter(Boolean).join(" ");
     await finalizeSuccessLog(customersLogId, totalSynced, customerNote);
     customersPartialCount = totalSynced;
+    if (rfmRefreshCustomerIds.size > 0) {
+      const { error: rfmErr } = await supabase.rpc("refresh_customer_rfm_metrics", {
+        _customer_ids: Array.from(rfmRefreshCustomerIds),
+      });
+      if (rfmErr) devError("refresh_customer_rfm_metrics customers module:", rfmErr.message, { count: rfmRefreshCustomerIds.size });
+    }
 
     results.customers = {
       synced: totalSynced,
@@ -563,6 +571,7 @@ Deno.serve(async (req) => {
   if (shouldRun("orders")) {
   let ordersLogId: string | null = null;
   let ordersPartialCount = 0;
+  const rfmRefreshCustomerIds = new Set<string>();
   try {
     ordersLogId = crypto.randomUUID();
     await supabase.from("sync_logs").insert({ id: ordersLogId, sync_type: "orders", status: "running" });
@@ -676,6 +685,7 @@ Deno.serve(async (req) => {
         const shopifyCustomerId = o.customer?.id?.replace("gid://shopify/Customer/", "") || null;
 
         const customerUuid = shopifyCustomerId ? customerIdByShopify.get(shopifyCustomerId) ?? null : null;
+        if (customerUuid) rfmRefreshCustomerIds.add(customerUuid);
         const custName = o.customer?.displayName || "Unknown";
         const custEmail = o.customer?.defaultEmailAddress?.emailAddress || null;
         const orderTags = Array.isArray(o.tags) ? o.tags.join(", ") : "";
@@ -804,6 +814,12 @@ Deno.serve(async (req) => {
       checkpointUnavailable ? checkpointNote : undefined,
     ].filter(Boolean).join(" ");
     await finalizeSuccessLog(ordersLogId, totalSynced, orderNote);
+    if (rfmRefreshCustomerIds.size > 0) {
+      const { error: rfmErr } = await supabase.rpc("refresh_customer_rfm_metrics", {
+        _customer_ids: Array.from(rfmRefreshCustomerIds),
+      });
+      if (rfmErr) devError("refresh_customer_rfm_metrics orders module:", rfmErr.message, { count: rfmRefreshCustomerIds.size });
+    }
 
     results.orders = {
       synced: totalSynced,

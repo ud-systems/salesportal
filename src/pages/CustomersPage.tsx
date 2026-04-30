@@ -40,6 +40,7 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [assignmentFilter, setAssignmentFilter] = useState("all");
+  const [rfmGroupFilter, setRfmGroupFilter] = useState("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [cityOpen, setCityOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
@@ -163,6 +164,7 @@ export default function CustomersPage() {
       search: "",
       cityFilter: "all",
       assignmentFilter: "all",
+      rfmGroupFilter: "all",
       fromDate: "",
       toDate: "",
       preset: "all" as DatePreset,
@@ -177,6 +179,7 @@ export default function CustomersPage() {
     setSearch(saved.search);
     setCityFilter(saved.cityFilter);
     setAssignmentFilter(saved.assignmentFilter);
+    setRfmGroupFilter((saved as { rfmGroupFilter?: string }).rfmGroupFilter || "all");
     setFromDate(saved.fromDate);
     setToDate(saved.toDate);
     setPreset(saved.preset);
@@ -193,6 +196,7 @@ export default function CustomersPage() {
       search,
       cityFilter,
       assignmentFilter,
+      rfmGroupFilter,
       fromDate,
       toDate,
       preset,
@@ -203,7 +207,7 @@ export default function CustomersPage() {
       selectedManagerId,
       selectedSalespersonId,
     });
-  }, [user?.id, search, cityFilter, assignmentFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter, scopeMode, selectedManagerId, selectedSalespersonId]);
+  }, [user?.id, search, cityFilter, assignmentFilter, rfmGroupFilter, fromDate, toDate, preset, sortBy, sortDir, quickRankFilter, scopeMode, selectedManagerId, selectedSalespersonId]);
 
   useEffect(() => {
     const update = () => setIsMobile(window.matchMedia("(max-width: 767px)").matches);
@@ -220,6 +224,7 @@ export default function CustomersPage() {
     search,
     cityFilter,
     assignmentFilter: assignmentFilter as "all" | "assigned" | "unassigned",
+    rfmGroupFilter,
     fromDate: fromYmd,
     toDate: toYmd,
     sortBy,
@@ -249,7 +254,25 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, cityFilter, assignmentFilter, pageSize, fromDate, toDate, sortBy, sortDir]);
+  }, [search, cityFilter, assignmentFilter, rfmGroupFilter, pageSize, fromDate, toDate, sortBy, sortDir]);
+
+  const rfmGroups = useMemo(
+    () => [
+      "all",
+      "Champions",
+      "Loyal Customers",
+      "Potential Loyalists",
+      "New Customers",
+      "Promising",
+      "Need Attention",
+      "About To Sleep",
+      "At Risk",
+      "Can Not Lose Them",
+      "Hibernating",
+      "Lost",
+    ],
+    [],
+  );
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -381,6 +404,18 @@ export default function CustomersPage() {
         <button onClick={() => setAssignmentFilter("all")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${assignmentFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>All Assignments</button>
         <button onClick={() => setAssignmentFilter("assigned")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${assignmentFilter === "assigned" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Assigned</button>
         <button onClick={() => setAssignmentFilter("unassigned")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${assignmentFilter === "unassigned" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Unassigned</button>
+        <Select value={rfmGroupFilter} onValueChange={setRfmGroupFilter}>
+          <SelectTrigger className="h-8 rounded-full bg-card px-3 text-xs font-body w-[220px]">
+            <SelectValue placeholder="RFM group" />
+          </SelectTrigger>
+          <SelectContent>
+            {rfmGroups.map((group) => (
+              <SelectItem key={group} value={group}>
+                {group === "all" ? "All RFM Groups" : group}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <button onClick={() => setQuickRankFilter("all")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>All</button>
         <button onClick={() => setQuickRankFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
         <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
@@ -502,6 +537,19 @@ export default function CustomersPage() {
               </button>
             ))}
           </div>
+          <p className="text-sm font-medium font-body text-foreground pt-1">RFM Group</p>
+          <Select value={rfmGroupFilter} onValueChange={setRfmGroupFilter}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="RFM Group" />
+            </SelectTrigger>
+            <SelectContent>
+              {rfmGroups.map((group) => (
+                <SelectItem key={group} value={group}>
+                  {group === "all" ? "All RFM Groups" : group}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </BottomSheet>
 
@@ -528,6 +576,7 @@ export default function CustomersPage() {
                     <th className="text-left py-2.5 font-medium">Store</th>
                     <th className="text-left py-2.5 font-medium">City</th>
                     {isAdmin && <th className="text-left py-2.5 font-medium">Salesperson</th>}
+                    <th className="text-left py-2.5 font-medium">RFM Group</th>
                     <th className="text-right py-2.5 font-medium">Orders</th>
                     <th className="text-right py-2.5 font-medium">Revenue</th>
                   </tr>
@@ -550,6 +599,7 @@ export default function CustomersPage() {
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${!c.sp_assigned || c.sp_assigned === "Unassigned" ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary"}`}>{c.sp_assigned || "Unassigned"}</span>
                         </td>
                       )}
+                      <td className="py-3 text-muted-foreground">{c.rfm_group || "Unclassified"}</td>
                       <td className="py-3 text-right font-medium text-foreground">{c.total_orders || 0}</td>
                       <td className="py-3 text-right font-medium text-foreground">
                         {formatOrderMoney(Number(c.total_revenue || 0), c.spend_currency, storeCurrency)}
@@ -580,7 +630,7 @@ export default function CustomersPage() {
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground font-body">{c.total_orders || 0} orders</span>
+                  <span className="text-muted-foreground font-body">{c.rfm_group || "Unclassified"} · {c.total_orders || 0} orders</span>
                   <span className="font-medium text-foreground font-body">
                     {formatOrderMoney(Number(c.total_revenue || 0), c.spend_currency, storeCurrency)}
                   </span>

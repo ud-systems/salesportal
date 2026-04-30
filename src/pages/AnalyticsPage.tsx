@@ -11,6 +11,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   useScopeOrderTimeseries,
   useScopeFinancialBreakdown,
+  useAnalyticsOverviewKpis,
+  useAnalyticsRfmGroupBreakdown,
+  useAnalyticsRfmScoreMatrix,
 } from "@/hooks/use-shopify-data";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { differenceInCalendarDays } from "date-fns";
@@ -201,12 +204,50 @@ export default function AnalyticsPage() {
     scopeKey,
     Boolean(user?.id),
   );
+  const { data: overviewKpis, isLoading: loadingOverviewKpis } = useAnalyticsOverviewKpis(
+    user?.id,
+    fromIso,
+    toIso,
+    Boolean(user?.id),
+  );
+  const { data: rfmGroups = [], isLoading: loadingRfmGroups } = useAnalyticsRfmGroupBreakdown(
+    user?.id,
+    fromIso,
+    toIso,
+    Boolean(user?.id),
+  );
+  const { data: rfmMatrix = [], isLoading: loadingRfmMatrix } = useAnalyticsRfmScoreMatrix(
+    user?.id,
+    Boolean(user?.id),
+  );
 
   const grossRevenue = metrics?.gross_revenue ?? 0;
   const netRevenue = metrics?.net_revenue ?? 0;
   const refundedAmount = metrics?.refunded_amount ?? 0;
   const orders = metrics?.orders_total_count ?? 0;
+  const activeBuyers = overviewKpis?.active_buyers_count ?? 0;
+  const registrations = overviewKpis?.registrations_count ?? 0;
   const chartSeries = useMemo(() => series.map((point) => ({ ...point })), [series]);
+  const rfmChartData = useMemo(
+    () =>
+      rfmGroups.map((row) => ({
+        group: row.rfm_group,
+        customers: row.customers_count,
+        activeBuyers: row.active_buyers_count,
+      })),
+    [rfmGroups],
+  );
+  const rfmMatrixMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const cell of rfmMatrix) {
+      map.set(`${cell.fm_score}-${cell.recency_score}`, Number(cell.customers_count || 0));
+    }
+    return map;
+  }, [rfmMatrix]);
+  const rfmMatrixMax = useMemo(
+    () => Math.max(1, ...Array.from(rfmMatrixMap.values())),
+    [rfmMatrixMap],
+  );
   const chartRenderKey = useMemo(() => {
     const totals = chartSeries.reduce(
       (acc, point) => {
@@ -489,7 +530,7 @@ export default function AnalyticsPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <KpiCard
               title="Gross revenue"
               value={loadingMetrics ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(grossRevenue, null, currency)}
@@ -514,6 +555,18 @@ export default function AnalyticsPage() {
               icon={ShoppingCart}
               delay={200}
             />
+            <KpiCard
+              title="Active buyers"
+              value={loadingOverviewKpis ? <Skeleton className="h-8 w-16 rounded-md" /> : String(activeBuyers)}
+              icon={Users}
+              delay={250}
+            />
+            <KpiCard
+              title="Registrations"
+              value={loadingOverviewKpis ? <Skeleton className="h-8 w-16 rounded-md" /> : String(registrations)}
+              icon={Users}
+              delay={300}
+            />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -532,9 +585,15 @@ export default function AnalyticsPage() {
                   <p className="text-muted-foreground text-sm font-body text-center">No orders in this period.</p>
                 </div>
               ) : (
-                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full">
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full rounded-xl border bg-muted/10 p-2 sm:p-3">
                   <ResponsiveContainer key={`revenue-${chartRenderKey}`} width="100%" height={220} minWidth={0} minHeight={220}>
                     <ComposedChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="analyticsRevenueBarGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.95} />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.55} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                     <XAxis
                       dataKey="label"
@@ -562,9 +621,15 @@ export default function AnalyticsPage() {
                         return [formatOrderMoney(v, null, currency), "Revenue"];
                       }}
                       labelFormatter={(label) => `Period: ${label}`}
-                      contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))" }}
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid hsl(var(--border))",
+                        background: "hsl(var(--card))",
+                        boxShadow: "0 10px 30px hsl(var(--foreground) / 0.08)",
+                      }}
+                      cursor={{ fill: "hsl(var(--primary) / 0.08)" }}
                     />
-                    <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="revenue" fill="url(#analyticsRevenueBarGradient)" radius={[6, 6, 0, 0]} maxBarSize={30} />
                     <Line
                       yAxisId="orders"
                       type="monotone"
@@ -572,6 +637,7 @@ export default function AnalyticsPage() {
                       stroke="hsl(var(--primary) / 0.7)"
                       strokeWidth={2}
                       dot={false}
+                      activeDot={{ r: 4, strokeWidth: 0 }}
                     />
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -591,7 +657,7 @@ export default function AnalyticsPage() {
                   <p className="text-muted-foreground text-sm font-body text-center">No order volume data.</p>
                 </div>
               ) : (
-                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full">
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full rounded-xl border bg-muted/10 p-2 sm:p-3">
                   <ResponsiveContainer key={`orders-${chartRenderKey}`} width="100%" height={220} minWidth={0} minHeight={220}>
                     <AreaChart data={chartSeries} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                     <defs>
@@ -613,7 +679,13 @@ export default function AnalyticsPage() {
                     <RechartsTooltip
                       formatter={(v: number) => [Number(v || 0).toLocaleString(), "Orders"]}
                       labelFormatter={(label) => `Period: ${label}`}
-                      contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))" }}
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid hsl(var(--border))",
+                        background: "hsl(var(--card))",
+                        boxShadow: "0 10px 30px hsl(var(--foreground) / 0.08)",
+                      }}
+                      cursor={{ fill: "hsl(var(--primary) / 0.08)" }}
                     />
                     <Area
                       type="monotone"
@@ -626,6 +698,101 @@ export default function AnalyticsPage() {
                     />
                     </AreaChart>
                   </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+            <div className="card-float p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
+                <h3 className="font-heading font-semibold text-foreground">RFM group distribution</h3>
+                <span className="text-xs text-muted-foreground font-body">
+                  Total {rfmChartData.reduce((sum, row) => sum + Number(row.customers || 0), 0).toLocaleString()} customers
+                </span>
+              </div>
+              {loadingRfmGroups ? (
+                <Skeleton className="h-[220px] sm:h-[240px] w-full rounded-xl" />
+              ) : rfmChartData.length === 0 ? (
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full rounded-xl border border-dashed flex flex-col items-center justify-center gap-2 bg-muted/20">
+                  <ChartNoAxesCombined className="h-5 w-5 text-muted-foreground" />
+                  <p className="text-muted-foreground text-sm font-body text-center">No RFM data available yet.</p>
+                </div>
+              ) : (
+                <div className="h-[220px] sm:h-[240px] min-h-[220px] min-w-0 w-full rounded-xl border bg-muted/10 p-2 sm:p-3">
+                  <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={220}>
+                    <ComposedChart data={rfmChartData} margin={{ top: 8, right: 4, left: 0, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis
+                        dataKey="group"
+                        interval={0}
+                        angle={-20}
+                        textAnchor="end"
+                        height={56}
+                        minTickGap={24}
+                        tick={{ fontSize: 10 }}
+                        stroke="hsl(var(--muted-foreground))"
+                      />
+                      <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                      <RechartsTooltip
+                        formatter={(value: number, name) => [Number(value || 0).toLocaleString(), name === "activeBuyers" ? "Active buyers" : "Customers"]}
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid hsl(var(--border))",
+                          background: "hsl(var(--card))",
+                          boxShadow: "0 10px 30px hsl(var(--foreground) / 0.08)",
+                        }}
+                        cursor={{ fill: "hsl(var(--primary) / 0.08)" }}
+                      />
+                      <Bar dataKey="customers" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} maxBarSize={34} />
+                      <Line
+                        type="monotone"
+                        dataKey="activeBuyers"
+                        stroke="hsl(var(--primary) / 0.65)"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4, strokeWidth: 0 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+            <div className="card-float p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
+                <h3 className="font-heading font-semibold text-foreground">RFM customer analysis</h3>
+                <span className="text-xs text-muted-foreground font-body">Shopify-style score matrix</span>
+              </div>
+              {loadingRfmMatrix ? (
+                <Skeleton className="h-[220px] sm:h-[240px] w-full rounded-xl" />
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[42px_repeat(5,minmax(0,1fr))] gap-1">
+                    <div />
+                    {[1, 2, 3, 4, 5].map((r) => (
+                      <div key={`x-${r}`} className="text-[11px] text-muted-foreground text-center">{r}</div>
+                    ))}
+                    {[5, 4, 3, 2, 1].map((fm) => (
+                      <div key={`row-${fm}`} className="contents">
+                        <div className="text-[11px] text-muted-foreground flex items-center justify-center">{fm}</div>
+                        {[1, 2, 3, 4, 5].map((r) => {
+                          const value = rfmMatrixMap.get(`${fm}-${r}`) || 0;
+                          const intensity = value <= 0 ? 0.06 : Math.max(0.12, value / rfmMatrixMax);
+                          return (
+                            <div
+                              key={`c-${fm}-${r}`}
+                              className="rounded-md h-10 flex items-center justify-center text-xs font-semibold text-foreground border border-border/40"
+                              style={{ backgroundColor: `hsl(var(--primary) / ${intensity})` }}
+                              title={`Recency ${r}, FM ${fm}: ${value.toLocaleString()} customers`}
+                            >
+                              {value > 0 ? value.toLocaleString() : ""}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>Frequency + Monetary value score</span>
+                    <span>Recency score</span>
+                  </div>
                 </div>
               )}
             </div>

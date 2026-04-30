@@ -53,6 +53,11 @@ export type Database = {
           phone: string | null
           province: string | null
           referred_by: string | null
+          rfm_frequency: number | null
+          rfm_group: string | null
+          rfm_monetary: number | null
+          rfm_recency_days: number | null
+          rfm_score: string | null
           shopify_created_at: string | null
           shopify_customer_id: string
           spend_currency: string | null
@@ -81,6 +86,11 @@ export type Database = {
           phone?: string | null
           province?: string | null
           referred_by?: string | null
+          rfm_frequency?: number | null
+          rfm_group?: string | null
+          rfm_monetary?: number | null
+          rfm_recency_days?: number | null
+          rfm_score?: string | null
           shopify_created_at?: string | null
           shopify_customer_id: string
           spend_currency?: string | null
@@ -109,6 +119,11 @@ export type Database = {
           phone?: string | null
           province?: string | null
           referred_by?: string | null
+          rfm_frequency?: number | null
+          rfm_group?: string | null
+          rfm_monetary?: number | null
+          rfm_recency_days?: number | null
+          rfm_score?: string | null
           shopify_created_at?: string | null
           shopify_customer_id?: string
           spend_currency?: string | null

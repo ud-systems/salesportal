@@ -40,6 +40,24 @@ export type ScopeFinancialBreakdown = {
   avg_order_net: number;
 };
 
+export type AnalyticsOverviewKpis = {
+  active_buyers_count: number;
+  registrations_count: number;
+};
+
+export type AnalyticsRfmGroupRow = {
+  rfm_group: string;
+  customers_count: number;
+  active_buyers_count: number;
+  revenue: number;
+};
+
+export type AnalyticsRfmMatrixCell = {
+  recency_score: number;
+  fm_score: number;
+  customers_count: number;
+};
+
 export type SalespersonFinancialBreakdownRow = {
   salesperson_user_id: string;
   salesperson_name: string;
@@ -232,6 +250,86 @@ export function useScopeFinancialBreakdown(
         avg_order_gross: Number(row.avg_order_gross || 0),
         avg_order_net: Number(row.avg_order_net || 0),
       } satisfies ScopeFinancialBreakdown;
+    }),
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+export function useAnalyticsOverviewKpis(
+  viewerUserId: string | undefined,
+  fromIso?: string | null,
+  toIso?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["analytics-overview-kpis", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
+    queryFn: async () => withQueryTiming("get_analytics_overview_kpis", { viewerUserId, fromIso: fromIso ?? null, toIso: toIso ?? null }, async () => {
+      if (!viewerUserId) {
+        return { active_buyers_count: 0, registrations_count: 0 } satisfies AnalyticsOverviewKpis;
+      }
+      const { data, error } = await (supabase as any).rpc("get_analytics_overview_kpis", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      const row = (data?.[0] ?? {}) as Partial<AnalyticsOverviewKpis>;
+      return {
+        active_buyers_count: Number(row.active_buyers_count || 0),
+        registrations_count: Number(row.registrations_count || 0),
+      } satisfies AnalyticsOverviewKpis;
+    }),
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+export function useAnalyticsRfmGroupBreakdown(
+  viewerUserId: string | undefined,
+  fromIso?: string | null,
+  toIso?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["analytics-rfm-group-breakdown", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
+    queryFn: async () => withQueryTiming("get_analytics_rfm_group_breakdown", { viewerUserId, fromIso: fromIso ?? null, toIso: toIso ?? null }, async () => {
+      if (!viewerUserId) return [] as AnalyticsRfmGroupRow[];
+      const { data, error } = await (supabase as any).rpc("get_analytics_rfm_group_breakdown", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      return ((data ?? []) as AnalyticsRfmGroupRow[]).map((row) => ({
+        rfm_group: String(row.rfm_group || "Unclassified"),
+        customers_count: Number(row.customers_count || 0),
+        active_buyers_count: Number(row.active_buyers_count || 0),
+        revenue: Number(row.revenue || 0),
+      }));
+    }),
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+export function useAnalyticsRfmScoreMatrix(
+  viewerUserId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["analytics-rfm-score-matrix", viewerUserId ?? "none"],
+    queryFn: async () => withQueryTiming("get_analytics_rfm_score_matrix", { viewerUserId }, async () => {
+      if (!viewerUserId) return [] as AnalyticsRfmMatrixCell[];
+      const { data, error } = await (supabase as any).rpc("get_analytics_rfm_score_matrix", {
+        _viewer_user_id: viewerUserId,
+      });
+      if (error) throw error;
+      return ((data ?? []) as AnalyticsRfmMatrixCell[]).map((row) => ({
+        recency_score: Number(row.recency_score || 1),
+        fm_score: Number(row.fm_score || 1),
+        customers_count: Number(row.customers_count || 0),
+      }));
     }),
     staleTime: 60_000,
     enabled: enabled && Boolean(viewerUserId),
@@ -1057,6 +1155,7 @@ type CustomerQueryParams = {
   search?: string;
   cityFilter?: string;
   assignmentFilter?: "all" | "assigned" | "unassigned";
+  rfmGroupFilter?: string;
   fromDate?: string;
   toDate?: string;
   sortBy?: "total_revenue" | "total_orders" | "shopify_created_at" | "name";
@@ -1100,6 +1199,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
     search = "",
     cityFilter = "all",
     assignmentFilter = "all",
+    rfmGroupFilter = "all",
     fromDate,
     toDate,
     sortBy = "total_revenue",
@@ -1123,6 +1223,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       search,
       cityFilter,
       assignmentFilter,
+      rfmGroupFilter,
       fromDate,
       toDate,
       sortBy,
@@ -1157,6 +1258,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
           _search: search || null,
           _city_filter: cityFilter,
           _assignment_filter: assignmentFilter,
+          _rfm_group_filter: rfmGroupFilter,
           _from_iso: fromIso,
           _to_iso: toIso,
           _sort_by: sortBy,
@@ -1186,6 +1288,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       if (cityFilter !== "all") query = query.eq("city", cityFilter);
       if (fromIso) query = query.gte("shopify_created_at", fromIso);
       if (toIso) query = query.lte("shopify_created_at", toIso);
+      if (rfmGroupFilter !== "all") query = query.eq("rfm_group", rfmGroupFilter);
       if (assignmentFilter === "assigned") {
         query = query.not("sp_assigned", "is", null).neq("sp_assigned", "Unassigned");
       } else if (assignmentFilter === "unassigned") {
@@ -1206,6 +1309,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
             search,
             cityFilter,
             assignmentFilter,
+            rfmGroupFilter,
             fromDate,
             toDate,
             sortBy,
