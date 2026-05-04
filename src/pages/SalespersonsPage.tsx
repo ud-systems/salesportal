@@ -1,5 +1,5 @@
 import { useCustomersPaginated, useOrdersPaginated, useSalespersonFinancialBreakdown } from "@/hooks/use-shopify-data";
-import { Users, PoundSterling } from "lucide-react";
+import { Users, PoundSterling, FileDown, FileText } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDisplayDate, formatOrderMoney } from "@/lib/format";
@@ -10,6 +10,33 @@ import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/comp
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/contexts/AuthContext";
+import { rowsToCsv } from "@/lib/analytics-report-data";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import { toast } from "sonner";
+
+const PDF_BRAND_PRIMARY_RGB: [number, number, number] = [93, 163, 67];
+
+function formatPresetLabel(preset: DatePreset): string {
+  switch (preset) {
+    case "all":
+      return "All Time";
+    case "today":
+      return "Today";
+    case "week":
+      return "Last 7 Days";
+    case "month":
+      return "This Month";
+    case "quarter":
+      return "This Quarter";
+    case "year":
+      return "This Year";
+    case "custom":
+      return "Custom Range";
+    default:
+      return "Period";
+  }
+}
 
 function initials(name: string) {
   return name
@@ -60,6 +87,108 @@ export default function SalespersonsPage() {
       })),
     [salespersons],
   );
+
+  const periodSubtitle = useMemo(() => {
+    if (preset === "all") return `Period: ${formatPresetLabel(preset)}`;
+    if (range.from && range.to && fromIso && toIso) {
+      return `Period: ${formatPresetLabel(preset)} | ${formatDisplayDate(fromIso)} – ${formatDisplayDate(toIso)}`;
+    }
+    return `Period: ${formatPresetLabel(preset)}`;
+  }, [preset, range.from, range.to, fromIso, toIso]);
+
+  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
+
+  const exportColumns = useMemo(
+    () => [
+      "Salesperson",
+      "Registered Customers",
+      "Orders",
+      "Paid",
+      "Refunded",
+      `Gross (${storeCurrency})`,
+      `Refund Amount (${storeCurrency})`,
+      `Net (${storeCurrency})`,
+    ],
+    [storeCurrency],
+  );
+
+  const runExportCsv = () => {
+    if (!rows.length) {
+      toast.error("No data to export.");
+      return;
+    }
+    setExporting("csv");
+    try {
+      const body = rows.map((sp) => [
+        sp.name,
+        sp.customers,
+        sp.orders,
+        sp.paidOrders,
+        sp.refundedOrders,
+        Number(sp.grossRevenue.toFixed(2)),
+        Number(sp.refundAmount.toFixed(2)),
+        Number(sp.netRevenue.toFixed(2)),
+      ]);
+      const csv = rowsToCsv(exportColumns, body);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `salespersons-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success("CSV downloaded");
+    } catch {
+      toast.error("CSV export failed");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const runExportPdf = () => {
+    if (!rows.length) {
+      toast.error("No data to export.");
+      return;
+    }
+    setExporting("pdf");
+    try {
+      const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+      doc.setFontSize(15);
+      doc.text("Salespersons — Performance", 14, 16);
+      doc.setFontSize(9);
+      doc.setTextColor(90);
+      doc.text(periodSubtitle, 14, 22);
+      doc.text(`Generated ${new Date().toLocaleString("en-GB")} · Display currency: ${storeCurrency}`, 14, 27);
+      doc.setTextColor(0);
+
+      const body = rows.map((sp) => [
+        sp.name,
+        sp.customers,
+        sp.orders,
+        sp.paidOrders,
+        sp.refundedOrders,
+        formatOrderMoney(sp.grossRevenue, null, storeCurrency),
+        formatOrderMoney(sp.refundAmount, null, storeCurrency),
+        formatOrderMoney(sp.netRevenue, null, storeCurrency),
+      ]);
+      autoTable(doc, {
+        startY: 32,
+        head: [exportColumns],
+        body,
+        styles: { fontSize: 7, cellPadding: 1.5 },
+        headStyles: { fillColor: PDF_BRAND_PRIMARY_RGB },
+        horizontalPageBreak: true,
+        margin: { left: 14, right: 14 },
+      });
+
+      doc.save(`salespersons-${new Date().toISOString().slice(0, 10)}.pdf`);
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("PDF export failed");
+    } finally {
+      setExporting(null);
+    }
+  };
+
   const selectedSalespersonId = selectedSalesperson?.id;
   const { data: selectedCustomersData, isLoading: loadingSelectedCustomers } = useCustomersPaginated({
     page: 1,
@@ -93,27 +222,66 @@ export default function SalespersonsPage() {
         <p className="text-muted-foreground font-body text-sm mt-1">Sales team performance</p>
       </div>
 
-      <div className={`grid grid-cols-1 gap-2 ${preset === "custom" ? "md:grid-cols-3" : "md:grid-cols-1"} opacity-0 animate-fade-in`} style={{ animationDelay: "60ms" }}>
-        <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
-          <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
-            <SelectValue placeholder="Period" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">Last 7 days</SelectItem>
-            <SelectItem value="month">This month</SelectItem>
-            <SelectItem value="quarter">This quarter</SelectItem>
-            <SelectItem value="year">This year</SelectItem>
-            <SelectItem value="custom">Custom</SelectItem>
-          </SelectContent>
-        </Select>
-        {preset === "custom" && (
-          <>
-            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
-            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-10 rounded-xl border bg-card px-3 text-sm font-body" />
-          </>
-        )}
+      <div
+        className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between opacity-0 animate-fade-in"
+        style={{ animationDelay: "60ms" }}
+      >
+        <div
+          className={`grid grid-cols-1 gap-2 ${preset === "custom" ? "md:grid-cols-3" : "md:grid-cols-1"} flex-1 min-w-0`}
+        >
+          <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+              <SelectValue placeholder="Period" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">Last 7 days</SelectItem>
+              <SelectItem value="month">This month</SelectItem>
+              <SelectItem value="quarter">This quarter</SelectItem>
+              <SelectItem value="year">This year</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+          {preset === "custom" && (
+            <>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="h-10 rounded-xl border bg-card px-3 text-sm font-body"
+              />
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="h-10 rounded-xl border bg-card px-3 text-sm font-body"
+              />
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl h-10 font-body"
+            onClick={runExportCsv}
+            disabled={isLoading || rows.length === 0 || exporting !== null}
+          >
+            <FileDown className="h-4 w-4 mr-2" />
+            {exporting === "csv" ? "Exporting…" : "Download CSV"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl h-10 font-body"
+            onClick={runExportPdf}
+            disabled={isLoading || rows.length === 0 || exporting !== null}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            {exporting === "pdf" ? "Exporting…" : "Download PDF"}
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (

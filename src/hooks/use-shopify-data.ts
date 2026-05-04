@@ -38,6 +38,8 @@ export type ScopeFinancialBreakdown = {
   net_revenue: number;
   avg_order_gross: number;
   avg_order_net: number;
+  /** Orders with NULL current_total (post-return total not synced); gross/net match until sync backfills. */
+  orders_missing_current_total: number;
 };
 
 export type AnalyticsOverviewKpis = {
@@ -229,6 +231,7 @@ export function useScopeFinancialBreakdown(
           net_revenue: 0,
           avg_order_gross: 0,
           avg_order_net: 0,
+          orders_missing_current_total: 0,
         } satisfies ScopeFinancialBreakdown;
       }
       const { data, error } = await supabase.rpc("get_scope_financial_breakdown", {
@@ -249,6 +252,7 @@ export function useScopeFinancialBreakdown(
         net_revenue: Number(row.net_revenue || 0),
         avg_order_gross: Number(row.avg_order_gross || 0),
         avg_order_net: Number(row.avg_order_net || 0),
+        orders_missing_current_total: Number(row.orders_missing_current_total ?? 0),
       } satisfies ScopeFinancialBreakdown;
     }),
     staleTime: 60_000,
@@ -699,11 +703,15 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     if (value === "partially refunded") return "partially_refunded";
     return value || "pending";
   };
-  const orderMap = new Map<string, { total: number; at: string; status: string }>();
+  const orderMap = new Map<
+    string,
+    { totalOrig: number; totalCurr: number; at: string; status: string }
+  >();
   const absorbOrders = (
     rows: {
       id: string;
       total: number | null;
+      current_total: number | null;
       financial_status: string | null;
       shopify_created_at: string | null;
       created_at: string | null;
@@ -714,14 +722,21 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       const at = row.shopify_created_at || row.created_at;
       if (!at) continue;
       if (!isInRange(at)) continue;
-      orderMap.set(row.id, { total: Number(row.total || 0), at, status: normalizeFinancialStatus(row.financial_status) });
+      const orig = Number(row.total || 0);
+      const curr = row.current_total != null ? Number(row.current_total) : orig;
+      orderMap.set(row.id, {
+        totalOrig: orig,
+        totalCurr: curr,
+        at,
+        status: normalizeFinancialStatus(row.financial_status),
+      });
     }
   };
 
   for (const part of splitIntoChunks(customerIds, 200)) {
     const query = supabase
       .from("shopify_orders")
-      .select("id, total, financial_status, shopify_created_at, created_at")
+      .select("id, total, current_total, financial_status, shopify_created_at, created_at")
       .in("customer_id", part);
     const { data, error } = await query;
     if (error) throw error;
@@ -729,6 +744,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       (data ?? []) as {
         id: string;
         total: number | null;
+        current_total: number | null;
         financial_status: string | null;
         shopify_created_at: string | null;
         created_at: string | null;
@@ -739,7 +755,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   for (const part of splitIntoChunks(shopifyCustomerIds, 200)) {
     const query = supabase
       .from("shopify_orders")
-      .select("id, total, financial_status, shopify_created_at, created_at")
+      .select("id, total, current_total, financial_status, shopify_created_at, created_at")
       .is("customer_id", null)
       .in("shopify_customer_id", part);
     const { data, error } = await query;
@@ -748,6 +764,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       (data ?? []) as {
         id: string;
         total: number | null;
+        current_total: number | null;
         financial_status: string | null;
         shopify_created_at: string | null;
         created_at: string | null;
@@ -764,12 +781,12 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   let ordersRefundedCount = 0;
 
   for (const [, order] of orderMap) {
-    grossRevenue += order.total;
+    grossRevenue += order.totalOrig;
+    refundedAmount += Math.max(0, order.totalOrig - order.totalCurr);
     ordersCount += 1;
     if (order.status === "paid" || order.status === "partially_paid") ordersPaidCount += 1;
     else if (order.status === "refunded" || order.status === "partially_refunded" || order.status === "voided") {
       ordersRefundedCount += 1;
-      refundedAmount += order.total;
     } else {
       ordersPendingCount += 1;
     }
@@ -792,7 +809,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       });
     }
     const prev = seriesMap.get(key) || { label, revenue: 0, orders: 0, sortKey: key };
-    prev.revenue += order.total;
+    prev.revenue += order.totalCurr;
     prev.orders += 1;
     seriesMap.set(key, prev);
   }
@@ -800,13 +817,15 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   const series = Array.from(seriesMap.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([, v]) => ({ label: v.label, revenue: v.revenue, orders: v.orders }));
-  const netRevenue = grossRevenue - refundedAmount;
+  const netRevenue = orderMap.size
+    ? Array.from(orderMap.values()).reduce((s, o) => s + o.totalCurr, 0)
+    : 0;
 
   return {
     orders_count: ordersCount,
     customers_count: customersCount,
-    revenue: grossRevenue,
-    avg_order_value: ordersCount > 0 ? grossRevenue / ordersCount : 0,
+    revenue: netRevenue,
+    avg_order_value: ordersCount > 0 ? netRevenue / ordersCount : 0,
     orders_total_count: ordersCount,
     orders_paid_count: ordersPaidCount,
     orders_pending_count: ordersPendingCount,
@@ -853,6 +872,7 @@ export function useSalespeopleScopedMetricsAndSeries(
           net_revenue: 0,
           avg_order_gross: 0,
           avg_order_net: 0,
+          orders_missing_current_total: 0,
           series: [] as TimeseriesPoint[],
         };
       }
@@ -872,6 +892,7 @@ export function useSalespeopleScopedMetricsAndSeries(
           net_revenue: 0,
           avg_order_gross: 0,
           avg_order_net: 0,
+          orders_missing_current_total: 0,
           series: [] as TimeseriesPoint[],
         };
       }
@@ -897,6 +918,7 @@ export function useSalespeopleScopedMetricsAndSeries(
         net_revenue?: number;
         avg_order_gross?: number;
         avg_order_net?: number;
+        orders_missing_current_total?: number;
         series?: Array<{ label?: string; revenue?: number; orders?: number }> | string | null;
       };
       const parsedSeries = Array.isArray(row.series)
@@ -918,6 +940,7 @@ export function useSalespeopleScopedMetricsAndSeries(
         net_revenue: Number(row.net_revenue || 0),
         avg_order_gross: Number(row.avg_order_gross || 0),
         avg_order_net: Number(row.avg_order_net || 0),
+        orders_missing_current_total: Number(row.orders_missing_current_total ?? 0),
         series: parsedSeries.map((item) => ({
           label: String(item.label ?? ""),
           revenue: Number(item.revenue || 0),
@@ -1025,6 +1048,7 @@ export function useAggregateFinancialBreakdownForViewers(
           net_revenue: 0,
           avg_order_gross: 0,
           avg_order_net: 0,
+          orders_missing_current_total: 0,
         } satisfies ScopeFinancialBreakdown;
       }
       const { data, error } = await (supabase as any).rpc("get_scope_financial_breakdown_for_viewers", {
@@ -1043,6 +1067,7 @@ export function useAggregateFinancialBreakdownForViewers(
         gross_revenue: Number(row.gross_revenue || 0),
         refunded_amount: Number(row.refunded_amount || 0),
         net_revenue: Number(row.net_revenue || 0),
+        orders_missing_current_total: Number(row.orders_missing_current_total ?? 0),
       };
       return {
         ...totals,

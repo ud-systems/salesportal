@@ -15,7 +15,7 @@ function hasRecoveryParamsInHash() {
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, loading, passwordRecoveryActive, clearPasswordRecovery } = useAuth();
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -24,28 +24,39 @@ export default function ResetPasswordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState<"request" | "update">("request");
   const [error, setError] = useState("");
+  /** False until we've decided request vs update from URL hash + getSession (avoids racing logged-in redirect). */
+  const [sessionResolved, setSessionResolved] = useState(false);
 
   const redirectTo = useMemo(() => `${window.location.origin}/reset-password`, []);
 
   useEffect(() => {
+    let cancelled = false;
     if (hasRecoveryParamsInHash()) {
       setMode("update");
+      setSessionResolved(true);
       return;
     }
 
     void (async () => {
       const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
       if (data.session) {
         setMode("update");
       }
+      setSessionResolved(true);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // Only bounce truly logged-in users who opened "Forgot password" while already signed in — not recovery sessions.
   useEffect(() => {
-    if (user) {
+    if (loading || !sessionResolved) return;
+    if (user && mode === "request" && !passwordRecoveryActive) {
       navigate("/dashboard", { replace: true });
     }
-  }, [navigate, user]);
+  }, [loading, sessionResolved, user, mode, passwordRecoveryActive, navigate]);
 
   const handleRequestReset = async (e: FormEvent) => {
     e.preventDefault();
@@ -87,6 +98,7 @@ export default function ResetPasswordPage() {
       return;
     }
 
+    clearPasswordRecovery();
     toast.success("Password updated. You can now sign in.");
     navigate("/login", { replace: true });
   };

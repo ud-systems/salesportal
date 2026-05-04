@@ -20,6 +20,9 @@ export interface AppUser {
 interface AuthContextType {
   user: AppUser | null;
   loading: boolean;
+  /** True after Supabase emits PASSWORD_RECOVERY (user followed an email reset link). Used to avoid treating recovery as a normal session. */
+  passwordRecoveryActive: boolean;
+  clearPasswordRecovery: () => void;
   login: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
   capabilities: AppCapability[];
@@ -84,6 +87,9 @@ function buildAppUser(authUser: User, role: UserRole, opts?: { roles?: UserRole[
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [passwordRecoveryActive, setPasswordRecoveryActive] = useState(false);
+
+  const clearPasswordRecovery = () => setPasswordRecoveryActive(false);
 
   useEffect(() => {
     const applySession = async (session: { user: User } | null) => {
@@ -110,11 +116,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Clear only local auth state, avoid noisy retry loops with stale tokens.
       await supabase.auth.signOut({ scope: "local" });
       setUser(null);
+      setPasswordRecoveryActive(false);
       setLoading(false);
     };
 
     // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecoveryActive(true);
+      }
+      if (event === "SIGNED_OUT") {
+        setPasswordRecoveryActive(false);
+      }
       void applySession(session as { user: User } | null);
     });
 
@@ -154,6 +167,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
+        passwordRecoveryActive,
+        clearPasswordRecovery,
         login,
         logout,
         capabilities,

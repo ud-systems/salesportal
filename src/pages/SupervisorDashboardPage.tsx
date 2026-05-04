@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart, PoundSterling, TrendingUp } from "lucide-react";
+import { ShoppingCart, PoundSterling } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
+import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -156,6 +157,15 @@ export default function SupervisorDashboardPage() {
     "supervisor",
     Boolean(user?.id) && scopeMode === "all",
   );
+  /** "Mine" KPIs use viewer aggregation; the supervisor-selected-manager timeseries only accepts manager UUIDs, so use the same single-viewer series as the rest of the app. */
+  const { data: mineScopeSeries = [], isLoading: loadingMineScopeSeries } = useScopeOrderTimeseries(
+    user?.id,
+    fromIso,
+    toIso,
+    bucket,
+    `${scopeKey}-mine`,
+    Boolean(user?.id) && scopeMode === "mine",
+  );
 
   const selectedViewerIds = useMemo(() => {
     if (scopeMode === "manager_team" && selectedManagerId !== "all") return [selectedManagerId];
@@ -206,7 +216,7 @@ export default function SupervisorDashboardPage() {
     toIso,
     bucket,
     scopeKey,
-    scopeMode !== "all",
+    scopeMode !== "all" && scopeMode !== "mine",
   );
   const { data: selectedManagerTeamRows = [], isLoading: loadingSelectedManagerTeamRows } = useDirectReportSalesPerformance(
     selectedManagerId !== "all" ? selectedManagerId : undefined,
@@ -227,11 +237,13 @@ export default function SupervisorDashboardPage() {
   const series =
     scopeMode === "all"
       ? allSeries
-      : isSalespersonDrilldown
-        ? drilledSalespersonSeries
-        : scopeMode === "salesperson"
-        ? salespersonScopedData?.series ?? []
-        : selectedManagerSeries;
+      : scopeMode === "mine"
+        ? mineScopeSeries
+        : isSalespersonDrilldown
+          ? drilledSalespersonSeries
+          : scopeMode === "salesperson"
+            ? salespersonScopedData?.series ?? []
+            : selectedManagerSeries;
   const loadingMetrics =
     scopeMode === "all"
       ? loadingAllMetrics
@@ -243,11 +255,13 @@ export default function SupervisorDashboardPage() {
   const loadingSeries =
     scopeMode === "all"
       ? loadingAllSeries
-      : isSalespersonDrilldown
-        ? loadingDrilledSalespersonSeries
-        : scopeMode === "salesperson"
-        ? loadingSalespersonScopedData
-        : loadingSelectedSeries;
+      : scopeMode === "mine"
+        ? loadingMineScopeSeries
+        : isSalespersonDrilldown
+          ? loadingDrilledSalespersonSeries
+          : scopeMode === "salesperson"
+            ? loadingSalespersonScopedData
+            : loadingSelectedSeries;
   const quickScopedIds = useMemo(() => {
     if (quickManagerFilter === "all") return null;
     const ranked = [...typedRows].sort((a, b) => Number(b.team_revenue || 0) - Number(a.team_revenue || 0));
@@ -397,10 +411,15 @@ export default function SupervisorDashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard title="Gross Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.gross_revenue || 0, null, currency)} icon={PoundSterling} info="Sum of all in-scope order totals (excluding test orders)." delay={50} />
-        <KpiCard title="Net Revenue" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.net_revenue || 0, null, currency)} icon={TrendingUp} info="Gross revenue minus refunded and voided order totals." delay={100} />
-        <KpiCard title="Refunded Amount" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.refunded_amount || 0, null, currency)} icon={PoundSterling} info="Order totals classified as refunded, partially refunded, or voided." delay={150} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+        <GrossNetRevenueCard
+          gross={metrics?.gross_revenue || 0}
+          net={metrics?.net_revenue || 0}
+          currency={currency}
+          loading={loadingMetrics}
+          delay={50}
+        />
+        <KpiCard title="Refunded Amount" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.refunded_amount || 0, null, currency)} icon={PoundSterling} info="Returns and adjustments: original minus current total per order." delay={150} />
         <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
       </div>
 

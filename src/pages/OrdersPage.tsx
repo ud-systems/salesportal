@@ -26,7 +26,7 @@ import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function OrdersPage() {
-  const { user, isSupervisor, isManager } = useAuth();
+  const { user, isAdmin, isSupervisor, isManager } = useAuth();
   const isLeader = isSupervisor || isManager;
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const [searchParams] = useSearchParams();
@@ -182,9 +182,11 @@ export default function OrdersPage() {
     return user?.salesperson_name ? [user.salesperson_name] : [];
   }, [isLeader, scopedOwnerNames, user?.salesperson_name]);
   const finalShouldApplyScopeFilters = useMemo(() => {
+    // Admins are not isLeader but must see all orders (RLS); never use salesperson-scoped RPC for them.
+    if (isAdmin) return false;
     if (isLeader) return shouldApplyExplicitScopeFilters;
     return true;
-  }, [isLeader, shouldApplyExplicitScopeFilters]);
+  }, [isAdmin, isLeader, shouldApplyExplicitScopeFilters]);
   const isScopeCustomersReady = true;
 
   useEffect(() => {

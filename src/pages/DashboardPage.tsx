@@ -1,4 +1,4 @@
-import { PoundSterling, ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide-react";
+import { ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
@@ -197,31 +197,20 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard
-          title="Gross Revenue"
-          value={
-            loadingRevenueTotal ? (
-              <Skeleton className="h-8 w-24 rounded-md" />
-            ) : (
-              formatOrderMoney(grossRevenue, null, currency)
-            )
-          }
-          icon={PoundSterling}
-          info="Sum of all non-test order totals in your scope and selected period."
+        <GrossNetRevenueCard
+          gross={grossRevenue}
+          net={netRevenue}
+          currency={currency}
+          loading={loadingRevenueTotal}
           delay={50}
-        />
-        <KpiCard
-          title="Net Revenue"
-          value={
-            loadingRevenueTotal ? (
-              <Skeleton className="h-8 w-24 rounded-md" />
-            ) : (
-              formatOrderMoney(netRevenue, null, currency)
-            )
+          info={
+            <>
+              <span className="font-medium text-foreground">Net</span> is current order totals after returns (Shopify currentTotal), aligned with Admin.
+              <span className="block mt-1">
+                <span className="font-medium text-foreground">Gross</span> is original totals before returns (totalPriceSet).
+              </span>
+            </>
           }
-          icon={PoundSterling}
-          info="Gross revenue minus refunded/partially_refunded/voided order totals."
-          delay={75}
         />
         <KpiCard
           title="Orders"
@@ -247,7 +236,7 @@ export default function DashboardPage() {
             )
           }
           icon={TrendingUp}
-          info="Total value of orders marked refunded, partially_refunded, or voided."
+          info="Returns and adjustments: original order total minus current total (same basis as Shopify)."
           delay={200}
         />
       </div>

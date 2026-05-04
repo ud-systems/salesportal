@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,13 +12,25 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const { login, user } = useAuth();
+  const { login, user, passwordRecoveryActive } = useAuth();
+
+  // Recovery links often land on Site URL (/ or /login). Forward hash before routing strips it.
+  useLayoutEffect(() => {
+    const raw = window.location.hash.replace(/^#/, "");
+    const params = new URLSearchParams(raw);
+    if (params.get("type") === "recovery" && params.get("access_token")) {
+      navigate({ pathname: "/reset-password", hash: raw }, { replace: true });
+    }
+  }, [navigate]);
 
   useEffect(() => {
-    if (user) {
-      navigate("/dashboard", { replace: true });
+    if (!user) return;
+    if (passwordRecoveryActive) {
+      navigate("/reset-password", { replace: true });
+      return;
     }
-  }, [user, navigate]);
+    navigate("/dashboard", { replace: true });
+  }, [user, passwordRecoveryActive, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KpiCard } from "@/components/KpiCard";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PoundSterling, ShoppingCart, Users, TrendingUp, FileDown, FileText, LayoutList, Info } from "lucide-react";
+import { PoundSterling, ShoppingCart, Users, FileDown, FileText, LayoutList, Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useScopeOrderTimeseries,
@@ -28,6 +28,7 @@ import {
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
+import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { ChartNoAxesCombined } from "lucide-react";
@@ -530,18 +531,14 @@ export default function AnalyticsPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-            <KpiCard
-              title="Gross revenue"
-              value={loadingMetrics ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(grossRevenue, null, currency)}
-              icon={PoundSterling}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <GrossNetRevenueCard
+              gross={grossRevenue}
+              net={netRevenue}
+              currency={currency}
+              loading={loadingMetrics}
               delay={50}
-            />
-            <KpiCard
-              title="Net revenue"
-              value={loadingMetrics ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(netRevenue, null, currency)}
-              icon={TrendingUp}
-              delay={100}
+              title="Revenue"
             />
             <KpiCard
               title="Refunded amount"

@@ -414,6 +414,7 @@ Deno.serve(async (req) => {
             subtotalPriceSet { shopMoney { amount } }
             currentTotalTaxSet { shopMoney { amount } }
             totalPriceSet { shopMoney { amount currencyCode } }
+            currentTotalPriceSet { shopMoney { amount currencyCode } }
             customer { id displayName defaultEmailAddress { emailAddress } }
             lineItems(first: 100) {
               edges {
@@ -459,6 +460,7 @@ Deno.serve(async (req) => {
           customer_name: o.customer?.displayName || "Unknown",
           email: o.email || o.customer?.defaultEmailAddress?.emailAddress || null,
           total: parseFloat(o.totalPriceSet?.shopMoney?.amount || "0"),
+          current_total: parseFloat(o.currentTotalPriceSet?.shopMoney?.amount ?? o.totalPriceSet?.shopMoney?.amount ?? "0"),
           currency_code: o.currencyCode || o.totalPriceSet?.shopMoney?.currencyCode || null,
           subtotal: parseFloat(o.subtotalPriceSet?.shopMoney?.amount || "0") || null,
           total_tax: parseFloat(o.currentTotalTaxSet?.shopMoney?.amount || "0") || null,

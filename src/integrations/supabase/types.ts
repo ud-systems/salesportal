@@ -188,6 +188,7 @@ export type Database = {
         Row: {
           created_at: string | null
           currency_code: string | null
+          current_total: number | null
           customer_id: string | null
           customer_name: string | null
           email: string | null
@@ -210,6 +211,7 @@ export type Database = {
         Insert: {
           created_at?: string | null
           currency_code?: string | null
+          current_total?: number | null
           customer_id?: string | null
           customer_name?: string | null
           email?: string | null
@@ -232,6 +234,7 @@ export type Database = {
         Update: {
           created_at?: string | null
           currency_code?: string | null
+          current_total?: number | null
           customer_id?: string | null
           customer_name?: string | null
           email?: string | null

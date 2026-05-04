@@ -1,4 +1,4 @@
-import { PoundSterling, ShoppingCart, Users, PackageX, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
+import { PoundSterling, Users, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import {
   useRecentOrders,
@@ -22,6 +22,8 @@ import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { useAuth } from "@/contexts/AuthContext";
+import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
+import { OrdersMetricsGroupCard } from "@/components/OrdersMetricsGroupCard";
 
 const TOP_SALES_BAR_COLORS = [
   "hsl(100 45% 42%)",
@@ -355,70 +357,47 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <KpiCard
-          title="Gross Revenue"
-          value={
-            loadingRevenueTotal ? (
-              <Skeleton className="h-8 w-24 rounded-md" />
-            ) : (
-              formatOrderMoney(grossRevenue, null, currency)
-            )
-          }
-          icon={PoundSterling}
-          info="Sum of all non-test order totals in scope and period, across all financial statuses."
-          delay={50}
-        />
-        <KpiCard
-          title="Net Revenue"
-          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(netRevenue, null, currency)}
-          icon={PoundSterling}
-          info="Gross revenue minus refunded/partially refunded/voided order amounts."
-          delay={75}
-        />
-        <KpiCard
-          title="Refunded Amount"
-          value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(refundedAmount, null, currency)}
-          icon={PoundSterling}
-          info="Sum of non-test orders with refunded, partially_refunded, or voided financial status."
-          delay={90}
-        />
-        <KpiCard
-          title="Total Orders"
-          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
-          icon={ShoppingCart}
-          info="Count of all non-test orders in scope and period, regardless of payment status."
-          delay={100}
-        />
-        <KpiCard
-          title="Paid Orders"
-          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : paidOrders.toString()}
-          icon={ShoppingCart}
-          info="Orders with financial status paid or partially_paid."
+      <div className="space-y-3 lg:space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
+          <GrossNetRevenueCard
+            gross={grossRevenue}
+            net={netRevenue}
+            currency={currency}
+            loading={loadingRevenueTotal}
+            delay={50}
+            info={
+              <>
+                <span className="font-medium text-foreground">Net</span> is the sum of current order totals after returns (Shopify currentTotal), organization-wide.
+                <span className="block mt-1">
+                  <span className="font-medium text-foreground">Gross</span> is the sum of original totals before returns (totalPriceSet), all non-test orders in scope.
+                </span>
+              </>
+            }
+          />
+          <KpiCard
+            title="Refunded Amount"
+            value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(refundedAmount, null, currency)}
+            icon={PoundSterling}
+            info="Returns and adjustments: original total minus current total per order."
+            delay={90}
+          />
+          <KpiCard
+            title="Registered Customers"
+            value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
+            icon={Users}
+            info="Scoped registered customers in the selected period (customer created-at filter)."
+            delay={150}
+          />
+        </div>
+        <OrdersMetricsGroupCard
+          total={totalOrders}
+          paid={paidOrders}
+          refundedOrders={refundedOrders}
+          unfulfilled={unfulfilledOrders}
+          loading={loadingOrdersCount}
+          loadingUnfulfilled={loadingUnfulfilled}
           delay={120}
         />
-        <KpiCard
-          title="Refunded Orders"
-          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : refundedOrders.toString()}
-          icon={ShoppingCart}
-          info="Orders with financial status refunded, partially_refunded, or voided."
-          delay={140}
-        />
-        <KpiCard
-          title="Registered Customers"
-          value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
-          icon={Users}
-          info="Scoped registered customers in the selected period (customer created-at filter)."
-          delay={150}
-        />
-        <Link to="/orders?fulfillment=unfulfilled" className="block">
-          <KpiCard
-            title="Unfulfilled Orders"
-            value={loadingUnfulfilled ? <Skeleton className="h-8 w-16 rounded-md" /> : unfulfilledOrders.toString()}
-            icon={PackageX}
-            delay={200}
-          />
-        </Link>
       </div>
 
       <div className={`grid grid-cols-1 items-stretch gap-4 ${salesBySP.length > 0 ? "lg:grid-cols-2" : ""}`}>

@@ -42,6 +42,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storageKey: STORAGE_KEY,
     persistSession: true,
     autoRefreshToken: true,
+    detectSessionInUrl: true,
   }
 });
 

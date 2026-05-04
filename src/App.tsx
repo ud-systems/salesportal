@@ -1,5 +1,7 @@
+import { useLayoutEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -32,6 +34,25 @@ const queryClient = new QueryClient({
   },
 });
 
+/** Sends password-recovery hash to `/reset-password`; otherwise `/login`. Site URL in Supabase often points at `/`. */
+function RootEntry() {
+  const navigate = useNavigate();
+  useLayoutEffect(() => {
+    const raw = window.location.hash.replace(/^#/, "");
+    const params = new URLSearchParams(raw);
+    if (params.get("type") === "recovery" && params.get("access_token")) {
+      navigate({ pathname: "/reset-password", hash: raw }, { replace: true });
+      return;
+    }
+    navigate("/login", { replace: true });
+  }, [navigate]);
+  return (
+    <div className="min-h-screen flex items-center justify-center gradient-bg">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
 function ProtectedLayout() {
   return (
     <ProtectedRoute>
@@ -48,7 +69,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Navigate to="/login" replace />} />
+            <Route path="/" element={<RootEntry />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route element={<ProtectedLayout />}>
