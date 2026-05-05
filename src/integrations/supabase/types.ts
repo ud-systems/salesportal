@@ -642,6 +642,10 @@ export type Database = {
           avg_order_value: number
         }[]
       }
+      get_shopify_order_items_for_viewer: {
+        Args: { _order_id: string; _viewer_user_id: string }
+        Returns: Database["public"]["Tables"]["shopify_order_items"]["Row"][]
+      }
       get_user_scope_user_ids: { Args: { _user_id: string }; Returns: string[] }
       get_salesperson_name: { Args: { _user_id: string }; Returns: string }
       has_role: {

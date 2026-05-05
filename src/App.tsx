@@ -24,6 +24,7 @@ import ProfilePage from "@/pages/ProfilePage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import NotFound from "./pages/NotFound.tsx";
+import { PwaUpdateNotifier } from "@/components/PwaUpdateNotifier";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -65,6 +66,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>
+        <PwaUpdateNotifier />
         <Toaster />
         <Sonner />
         <BrowserRouter>

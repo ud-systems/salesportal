@@ -1,0 +1,19 @@
+---
+description: Keep role dashboards and analytics aligned when changing KPIs or financial UX
+globs: src/pages/*Dashboard*.tsx,src/pages/AnalyticsPage.tsx,src/components/Dashboard*.tsx
+---
+
+# Dashboard consistency
+
+When adding or changing **revenue KPIs, financial tooltips, or breakdown metrics** (e.g. gross/net, `current_total`, `orders_missing_current_total`):
+
+1. Update **every** user-facing surface that shows those metrics in the same session:
+   - `DashboardPage.tsx` (salesperson / default)
+   - `AdminDashboardPage.tsx`
+   - `SupervisorDashboardPage.tsx`
+   - `ManagerDashboardPage.tsx`
+   - `AnalyticsPage.tsx` (overview KPIs)
+2. Prefer **shared KPI components** (e.g. `GrossNetRevenueCard`, `OrdersMetricsGroupCard`) over duplicating layout in one role only.
+3. If a new field comes from an RPC, wire it in `use-shopify-data.ts` for **all** hooks that power those pages (e.g. scope breakdown, aggregate for viewers, salespeople scoped metrics), and add/extend a Supabase migration as needed.
+
+Do not ship a change to only one dashboard when the same numbers appear elsewhere for other roles.

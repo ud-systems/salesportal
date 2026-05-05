@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";
 import { devError, devInfo } from "@/lib/dev-logger";
 import { useQuery } from "@tanstack/react-query";
@@ -1919,12 +1920,16 @@ export function useOrderItems(orderId?: string) {
   return useQuery({
     queryKey: ["shopify-order-items", orderId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("shopify_order_items")
-        .select("*")
-        .eq("order_id", orderId!);
+      if (!orderId) return [];
+      const { data: userData } = await supabase.auth.getUser();
+      const viewerUserId = userData.user?.id;
+      if (!viewerUserId) return [];
+      const { data, error } = await supabase.rpc("get_shopify_order_items_for_viewer", {
+        _viewer_user_id: viewerUserId,
+        _order_id: orderId,
+      });
       if (error) throw error;
-      return data;
+      return (data ?? []) as Tables<"shopify_order_items">[];
     },
     enabled: !!orderId,
   });

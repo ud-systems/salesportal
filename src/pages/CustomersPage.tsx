@@ -614,7 +614,20 @@ export default function CustomersPage() {
 
           <div className="relative md:hidden space-y-3">
             {customersVisible.map((c, i) => (
-              <div key={c.id} className="card-float p-4 tap-scale opacity-0 animate-fade-in" style={{ animationDelay: `${100 + i * 50}ms` }}>
+              <div
+                key={c.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedCustomer(c)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedCustomer(c);
+                  }
+                }}
+                className="card-float p-4 tap-scale opacity-0 animate-fade-in cursor-pointer active:bg-muted/40"
+                style={{ animationDelay: `${100 + i * 50}ms` }}
+              >
                 <div className="flex items-center gap-3 mb-3">
                   <div className="h-10 w-10 rounded-full gradient-primary flex items-center justify-center shrink-0">
                     <span className="text-primary-foreground text-xs font-bold font-heading">{c.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</span>
