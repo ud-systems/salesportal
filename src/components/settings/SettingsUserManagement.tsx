@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { parseEdgeFunctionErrorPayload } from "@/lib/shopify-credentials";
+import { invalidateAllAppQueries } from "@/lib/client-cache";
 
 export type ListedAppUser = {
   id: string;
@@ -104,6 +106,7 @@ function isAdminLevelRole(role: ListedAppUser["role"] | FormState["role"]) {
 
 export function SettingsUserManagement() {
   const { user: currentUser } = useAuth();
+  const queryClient = useQueryClient();
   const mdUp = useIsMdUp();
   const [users, setUsers] = useState<ListedAppUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -216,6 +219,7 @@ export function SettingsUserManagement() {
           salesperson_name: isAdminLevelRole(form.role) ? "" : form.salesperson_name.trim(),
         });
         toast.success("User created");
+        await invalidateAllAppQueries(queryClient);
       } else if (editing) {
         const payload: Record<string, unknown> = {
           action: "update",
@@ -232,6 +236,7 @@ export function SettingsUserManagement() {
         }
         await invokeAdminUsers(payload);
         toast.success("User updated");
+        await invalidateAllAppQueries(queryClient);
       }
       setFormOpen(false);
       await loadUsers();
@@ -249,6 +254,7 @@ export function SettingsUserManagement() {
       await invokeAdminUsers({ action: "delete", user_id: deleteTarget.id });
       toast.success("User removed");
       setDeleteTarget(null);
+      await invalidateAllAppQueries(queryClient);
       await loadUsers();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
@@ -280,6 +286,7 @@ export function SettingsUserManagement() {
         supervisor_user_id: row.supervisor_user_id || null,
       });
       toast.success("Hierarchy assignment saved.");
+      await invalidateAllAppQueries(queryClient);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save hierarchy assignment");
     } finally {

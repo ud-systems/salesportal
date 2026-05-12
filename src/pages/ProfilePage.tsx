@@ -1,6 +1,8 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Eye, EyeOff, Loader2, Mail, User } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Loader2, Mail, RefreshCw, User } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateAllAppQueries, clearUserFilterPresetsLocal } from "@/lib/client-cache";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
@@ -9,7 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 export default function ProfilePage() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, refreshSessionUser } = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -19,7 +22,22 @@ export default function ProfilePage() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
+  const [cacheBusy, setCacheBusy] = useState(false);
   if (!user) return null;
+
+  async function handleReloadCachedData(clearFilters: boolean) {
+    setCacheBusy(true);
+    try {
+      await refreshSessionUser();
+      await invalidateAllAppQueries(queryClient);
+      if (clearFilters) clearUserFilterPresetsLocal(user.id);
+      toast.success(clearFilters ? "Data and saved filters reloaded." : "Dashboard data reloaded.");
+    } catch {
+      toast.error("Could not reload. Try again or refresh the page.");
+    } finally {
+      setCacheBusy(false);
+    }
+  }
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,6 +136,36 @@ export default function ProfilePage() {
             }}
           >
             Sign out
+          </Button>
+        </div>
+      </div>
+
+      <div className="card-float p-6 space-y-3 opacity-0 animate-fade-in" style={{ animationDelay: "150ms" }}>
+        <div>
+          <h2 className="text-base font-heading font-semibold text-foreground">Cached data</h2>
+          <p className="text-xs text-muted-foreground font-body mt-1">
+            Pull fresh numbers and team scope from the server, and reload your role from the database (about a minute of cached data is cleared).
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl font-body gap-2"
+            disabled={cacheBusy}
+            onClick={() => void handleReloadCachedData(false)}
+          >
+            {cacheBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Reload dashboard data
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-xl font-body text-muted-foreground"
+            disabled={cacheBusy}
+            onClick={() => void handleReloadCachedData(true)}
+          >
+            Reload and reset saved filters
           </Button>
         </div>
       </div>

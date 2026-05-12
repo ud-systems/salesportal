@@ -963,17 +963,26 @@ export function useSalespeopleUnderManagers(
     queryKey: ["salespeople-under-managers", scopeKey, [...managerUserIds].sort().join(",")],
     queryFn: async () => {
       if (!managerUserIds.length) return [] as string[];
-      let rows: { member_user_id: string }[] = [];
+      /**
+       * Use the get_pure_salespeople_under_managers RPC so that users who hold a
+       * manager/supervisor role (e.g. the supervisor that owns the manager) are
+       * filtered out even if they appear as members in sales_hierarchy_edges.
+       * The admin-users edge function assigns BOTH a 'salesperson' and a leader
+       * role to managers/supervisors, so the previous direct query against
+       * sales_hierarchy_edges leaked leaders into the Salesperson dropdown.
+       */
+      const ids = new Set<string>();
       for (const part of splitIntoChunks(managerUserIds, 200)) {
-        const { data, error } = await supabase
-          .from("sales_hierarchy_edges")
-          .select("member_user_id")
-          .eq("leader_role", "manager")
-          .in("leader_user_id", part);
+        const { data, error } = await (supabase as any).rpc("get_pure_salespeople_under_managers", {
+          _manager_user_ids: part,
+        });
         if (error) throw error;
-        rows = rows.concat((data ?? []) as { member_user_id: string }[]);
+        for (const row of (data ?? []) as { user_id?: string | null }[]) {
+          const id = String(row.user_id ?? "").trim();
+          if (id) ids.add(id);
+        }
       }
-      return Array.from(new Set(rows.map((r) => r.member_user_id).filter(Boolean)));
+      return Array.from(ids);
     },
     staleTime: 60_000,
     enabled: enabled && managerUserIds.length > 0,
