@@ -24,7 +24,17 @@ export default defineConfig({
     VitePWA({
       registerType: "prompt",
       injectRegister: null,
-      includeAssets: ["favicon.png", "apple-touch-icon.png", "og-image.svg", "robots.txt", "pwa-192.png", "pwa-512.png"],
+      includeAssets: [
+        "favicon.png",
+        "apple-touch-icon.png",
+        "og-image.svg",
+        "robots.txt",
+        "pwa-192.png",
+        "pwa-512.png",
+        "pwa-maskable-512.png",
+        "pwa-screenshot-wide.png",
+        "pwa-screenshot-narrow.png",
+      ],
       manifest: {
         id: "/",
         name: "Unique Distribution CRM",
@@ -54,10 +64,26 @@ export default defineConfig({
             purpose: "any",
           },
           {
-            src: "pwa-512.png",
+            src: "pwa-maskable-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
+          },
+        ],
+        screenshots: [
+          {
+            src: "pwa-screenshot-wide.png",
+            sizes: "1280x720",
+            type: "image/png",
+            form_factor: "wide",
+            label: "Unique Distribution CRM on desktop",
+          },
+          {
+            src: "pwa-screenshot-narrow.png",
+            sizes: "720x1280",
+            type: "image/png",
+            form_factor: "narrow",
+            label: "Unique Distribution CRM on mobile",
           },
         ],
         shortcuts: [

@@ -5,9 +5,9 @@ import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  useDirectReportSalesPerformance,
   useManagerSelectedSalespeopleTimeseries,
   useManagerTeamMemberOptions,
+  useSalespersonFinancialBreakdown,
   useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
   useSalespeopleScopedMetricsAndSeries,
@@ -92,12 +92,19 @@ export default function ManagerDashboardPage() {
   }, [preset]);
 
   const { data: teamMemberOptions = [] } = useManagerTeamMemberOptions(user?.id, scopeKey);
-  const { data: teamRows = [], isLoading: loadingTeam } = useDirectReportSalesPerformance(
-    user?.id,
-    "manager",
-    "manager",
+  /**
+   * Use the financial-breakdown RPC so the table can show both Gross and Net
+   * revenue per salesperson (the legacy get_salesperson_performance_rows only
+   * returned a single net-style "revenue" column). Both RPCs are filtered to
+   * exclude leaders so the manager themselves never leaks in here.
+   */
+  const { data: teamBreakdownRows = [], isLoading: loadingTeam } = useSalespersonFinancialBreakdown(
+    `manager-${user?.id ?? "none"}-team-breakdown`,
     fromIso,
     toIso,
+    user?.id ?? null,
+    "manager",
+    Boolean(user?.id),
   );
   const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeFinancialBreakdown(
     user?.id,
@@ -138,31 +145,111 @@ export default function ManagerDashboardPage() {
     scopeKey,
     scopeMode !== "team",
   );
+  /**
+   * Always fetch the manager's own assigned-customer metrics so we can render
+   * a "self" row in the Direct Reports Performance table. `teamRows` (from
+   * get_salesperson_performance_rows) intentionally excludes users that hold a
+   * manager/supervisor role, so the manager would otherwise be invisible in
+   * their own team breakdown. Reuses the existing per-salesperson RPC with the
+   * manager's own user id.
+   */
+  const { data: selfMetrics } = useSalespeopleScopedMetricsAndSeries(
+    user?.id ? [user.id] : [],
+    fromIso,
+    toIso,
+    bucket,
+    `${scopeKey}-self`,
+    Boolean(user?.id),
+  );
 
   const metrics = scopeMode === "team" ? allMetrics : scopedData;
   const series = scopeMode === "team" ? allSeries : (selectedSeries.length ? selectedSeries : scopedData?.series ?? []);
   const loadingMetrics = scopeMode === "team" ? loadingAllMetrics : loadingScopedData || loadingSelectedSeries;
   const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
+
+  type BreakdownRow = {
+    salesperson_user_id: string;
+    salesperson_name: string;
+    customers_count: number;
+    orders_total_count: number;
+    gross_revenue: number;
+    net_revenue: number;
+  };
+
+  const teamRows = useMemo<BreakdownRow[]>(
+    () =>
+      teamBreakdownRows.map((row) => ({
+        salesperson_user_id: row.salesperson_user_id,
+        salesperson_name: row.salesperson_name,
+        customers_count: Number(row.customers_count || 0),
+        orders_total_count: Number(row.orders_total_count || 0),
+        gross_revenue: Number(row.gross_revenue || 0),
+        net_revenue: Number(row.net_revenue || 0),
+      })),
+    [teamBreakdownRows],
+  );
+
+  const selfRow = useMemo<BreakdownRow | null>(() => {
+    if (!user?.id) return null;
+    return {
+      salesperson_user_id: user.id,
+      salesperson_name: user.salesperson_name?.trim() || user.name || "Me",
+      customers_count: Number(selfMetrics?.customers_count || 0),
+      orders_total_count: Number(selfMetrics?.orders_total_count || selfMetrics?.orders_count || 0),
+      gross_revenue: Number(selfMetrics?.gross_revenue || 0),
+      net_revenue: Number(selfMetrics?.net_revenue || selfMetrics?.revenue || 0),
+    };
+  }, [user?.id, user?.name, user?.salesperson_name, selfMetrics]);
+
+  /**
+   * Direct Reports Performance rows BEFORE quick (top/bottom) filters.
+   * - team: manager + direct reports (manager wants to be part of the team breakdown)
+   * - mine: just the manager
+   * - salesperson: only the chosen salesperson (or all reports when "all")
+   */
+  const baseRowsForScope = useMemo<BreakdownRow[]>(() => {
+    if (scopeMode === "mine") return selfRow ? [selfRow] : [];
+    if (scopeMode === "salesperson") {
+      if (selectedSalespersonId === "all") return teamRows;
+      return teamRows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
+    }
+    return selfRow ? [selfRow, ...teamRows] : teamRows;
+  }, [scopeMode, selectedSalespersonId, teamRows, selfRow]);
+
   const quickScopedIds = useMemo(() => {
     if (quickMemberFilter === "all") return null;
-    const ranked = [...teamRows].sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
+    const ranked = [...baseRowsForScope].sort(
+      (a, b) => Number(b.gross_revenue || 0) - Number(a.gross_revenue || 0),
+    );
     const sliced = quickMemberFilter === "top3" ? ranked.slice(0, 3) : ranked.slice(-3);
     return new Set(sliced.map((r) => r.salesperson_user_id));
-  }, [teamRows, quickMemberFilter]);
+  }, [baseRowsForScope, quickMemberFilter]);
 
-  const filteredTeamRows = useMemo(() => {
-    let rows = teamRows;
-    if (scopeMode === "salesperson" && selectedSalespersonId !== "all") {
-      rows = rows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
-    }
-    if (scopeMode === "mine" && user?.id) {
-      rows = rows.filter((row) => row.salesperson_user_id === user.id);
-    }
-    if (quickScopedIds) {
-      rows = rows.filter((row) => quickScopedIds.has(row.salesperson_user_id));
-    }
-    return rows;
-  }, [scopeMode, selectedSalespersonId, teamRows, user?.id, quickScopedIds]);
+  const filteredTeamRows = useMemo<BreakdownRow[]>(() => {
+    if (!quickScopedIds) return baseRowsForScope;
+    return baseRowsForScope.filter((row) => quickScopedIds.has(row.salesperson_user_id));
+  }, [baseRowsForScope, quickScopedIds]);
+
+  /**
+   * Sum of the breakdown rows. We expose it as a Totals row so the manager can
+   * compare against the KPI cards above and confirm the manager + team add up
+   * (the KPI uses get_scope_financial_breakdown over the manager's full scope,
+   * which already includes the manager via get_user_scope_user_ids; rows sum
+   * may be slightly higher than the KPI when the same customer is assigned to
+   * more than one salesperson, because the KPI deduplicates at the order level).
+   */
+  const breakdownTotals = useMemo(() => {
+    return filteredTeamRows.reduce(
+      (acc, row) => {
+        acc.customers_count += Number(row.customers_count || 0);
+        acc.orders_total_count += Number(row.orders_total_count || 0);
+        acc.gross_revenue += Number(row.gross_revenue || 0);
+        acc.net_revenue += Number(row.net_revenue || 0);
+        return acc;
+      },
+      { customers_count: 0, orders_total_count: 0, gross_revenue: 0, net_revenue: 0 },
+    );
+  }, [filteredTeamRows]);
 
   return (
     <div className="w-full space-y-6">
@@ -312,7 +399,8 @@ export default function ManagerDashboardPage() {
                   <th className="text-left py-2.5 font-medium">Salesperson</th>
                   <th className="text-right py-2.5 font-medium">Registered Customers</th>
                   <th className="text-right py-2.5 font-medium">Orders</th>
-                  <th className="text-right py-2.5 font-medium">Revenue</th>
+                  <th className="text-right py-2.5 font-medium">Gross</th>
+                  <th className="text-right py-2.5 font-medium">Net Revenue</th>
                 </tr>
               </thead>
               <tbody>
@@ -320,10 +408,20 @@ export default function ManagerDashboardPage() {
                   <tr key={row.salesperson_user_id} className="border-b last:border-0">
                     <td className="py-3">{row.salesperson_name}</td>
                     <td className="py-3 text-right">{row.customers_count}</td>
-                    <td className="py-3 text-right">{row.orders_count}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(row.revenue, null, currency)}</td>
+                    <td className="py-3 text-right">{row.orders_total_count}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.gross_revenue, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.net_revenue, null, currency)}</td>
                   </tr>
                 ))}
+                {filteredTeamRows.length > 1 && (
+                  <tr className="border-t-2 border-foreground/20 font-semibold bg-muted/30">
+                    <td className="py-3">Total</td>
+                    <td className="py-3 text-right">{breakdownTotals.customers_count}</td>
+                    <td className="py-3 text-right">{breakdownTotals.orders_total_count}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.gross_revenue, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.net_revenue, null, currency)}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

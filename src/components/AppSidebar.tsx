@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import type { AppCapability } from "@/lib/auth-capabilities";
+import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -152,7 +153,10 @@ export function AppSidebar() {
           </nav>
         </div>
 
-        <div className="p-3 border-t">
+        <div className="p-3 border-t space-y-2">
+          <div className="px-3">
+            <PwaInstallPrompt />
+          </div>
           <div className="flex items-center gap-3 px-3 py-2">
             <div className="h-8 w-8 rounded-full gradient-primary flex items-center justify-center">
               <span className="text-primary-foreground text-xs font-bold font-heading">{user?.initials}</span>

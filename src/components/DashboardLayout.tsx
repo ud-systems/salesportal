@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/AppSidebar";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { PostLoginNotifications } from "@/components/PostLoginNotifications";
 import { Outlet } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,6 +17,7 @@ export default function DashboardLayout() {
           !isAdmin && "flex flex-col items-stretch",
         )}
       >
+        <OfflineBanner />
         <div className="w-full flex-1">
           <Outlet />
         </div>
