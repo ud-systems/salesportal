@@ -6,7 +6,7 @@ import path from "path";
 const UD_THEME = "#0A2342";
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
@@ -118,8 +118,10 @@ export default defineConfig({
           },
         ],
       },
+      // Register a dev service worker so Chrome can fire `beforeinstallprompt` on localhost.
+      // Without this, `npm run dev` never looks “installable” and our in-app Install CTA stays inert.
       devOptions: {
-        enabled: false,
+        enabled: mode === "development",
       },
     }),
   ],
@@ -129,4 +131,4 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom", "react-is", "react/jsx-runtime", "react/jsx-dev-runtime"],
   },
-});
+}));
