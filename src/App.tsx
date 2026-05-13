@@ -1,7 +1,5 @@
-import { useLayoutEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -35,23 +33,14 @@ const queryClient = new QueryClient({
   },
 });
 
-/** Sends password-recovery hash to `/reset-password`; otherwise `/login`. Site URL in Supabase often points at `/`. */
-function RootEntry() {
-  const navigate = useNavigate();
-  useLayoutEffect(() => {
-    const raw = window.location.hash.replace(/^#/, "");
-    const params = new URLSearchParams(raw);
-    if (params.get("type") === "recovery" && params.get("access_token")) {
-      navigate({ pathname: "/reset-password", hash: raw }, { replace: true });
-      return;
-    }
-    navigate("/login", { replace: true });
-  }, [navigate]);
-  return (
-    <div className="min-h-screen flex items-center justify-center gradient-bg">
-      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-    </div>
-  );
+/** Site URL often points at `/`. Declarative redirect avoids an extra paint + async navigate (spinner) before `/login` or recovery. */
+function RootRedirect() {
+  const raw = typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : "";
+  const params = new URLSearchParams(raw);
+  if (params.get("type") === "recovery" && params.get("access_token")) {
+    return <Navigate to={{ pathname: "/reset-password", hash: window.location.hash }} replace />;
+  }
+  return <Navigate to="/login" replace />;
 }
 
 function ProtectedLayout() {
@@ -71,7 +60,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<RootEntry />} />
+            <Route path="/" element={<RootRedirect />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route element={<ProtectedLayout />}>

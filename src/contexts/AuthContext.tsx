@@ -52,12 +52,23 @@ function pickPrimaryRole(roles: UserRole[]): UserRole {
   return "salesperson";
 }
 
+const USER_ROLE_FETCH_MS = 12_000;
+
 async function fetchUserRole(userId: string): Promise<{ role: UserRole; roles: UserRole[]; salesperson_name?: string } | null> {
-  const { data, error } = await supabase
+  const queryPromise = supabase
     .from("user_roles")
     .select("role, salesperson_name")
     .eq("user_id", userId)
     .returns<{ role: UserRole; salesperson_name: string | null }[]>();
+
+  const result = await Promise.race([
+    queryPromise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), USER_ROLE_FETCH_MS)),
+  ]);
+
+  if (result === null) return null;
+
+  const { data, error } = result;
   if (error || !data) return null;
   const roles = Array.from(new Set(data.map((row) => row.role)));
   if (!roles.length) return null;
@@ -94,23 +105,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearPasswordRecovery = () => setPasswordRecoveryActive(false);
 
   const applySession = useCallback(async (session: { user: User } | null, setLoadingFlag: boolean) => {
-    if (session?.user) {
-      const roleData = await fetchUserRole(session.user.id);
-      if (roleData) {
-        setUser(
-          buildAppUser(session.user, roleData.role, {
-            roles: roleData.roles,
-            salesperson_name: roleData.salesperson_name,
-            hasDbRole: true,
-          }),
-        );
+    try {
+      if (session?.user) {
+        const roleData = await fetchUserRole(session.user.id);
+        if (roleData) {
+          setUser(
+            buildAppUser(session.user, roleData.role, {
+              roles: roleData.roles,
+              salesperson_name: roleData.salesperson_name,
+              hasDbRole: true,
+            }),
+          );
+        } else {
+          setUser(buildAppUser(session.user, "salesperson", { hasDbRole: false }));
+        }
       } else {
-        setUser(buildAppUser(session.user, "salesperson", { hasDbRole: false }));
+        setUser(null);
       }
-    } else {
-      setUser(null);
+    } catch {
+      if (session?.user) {
+        setUser(buildAppUser(session.user, "salesperson", { hasDbRole: false }));
+      } else {
+        setUser(null);
+      }
+    } finally {
+      if (setLoadingFlag) setLoading(false);
     }
-    if (setLoadingFlag) setLoading(false);
   }, []);
 
   const refreshSessionUser = useCallback(async () => {
