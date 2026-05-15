@@ -34,11 +34,14 @@ export type ScopeFinancialBreakdown = {
   orders_paid_count: number;
   orders_pending_count: number;
   orders_refunded_count: number;
-  gross_revenue: number;
-  refunded_amount: number;
-  net_revenue: number;
-  avg_order_gross: number;
-  avg_order_net: number;
+  original_gross_sales: number;
+  current_gross_sales: number;
+  net_sales_ex_vat: number;
+  vat_collected: number;
+  refunded_returned_value: number;
+  avg_order_original_gross: number;
+  avg_order_current_gross: number;
+  avg_order_net_ex_vat: number;
   /** Orders with NULL current_total (post-return total not synced); gross/net match until sync backfills. */
   orders_missing_current_total: number;
 };
@@ -69,11 +72,14 @@ export type SalespersonFinancialBreakdownRow = {
   orders_paid_count: number;
   orders_pending_count: number;
   orders_refunded_count: number;
-  gross_revenue: number;
-  refunded_amount: number;
-  net_revenue: number;
-  avg_order_gross: number;
-  avg_order_net: number;
+  original_gross_sales: number;
+  current_gross_sales: number;
+  net_sales_ex_vat: number;
+  vat_collected: number;
+  refunded_returned_value: number;
+  avg_order_original_gross: number;
+  avg_order_current_gross: number;
+  avg_order_net_ex_vat: number;
 };
 
 export type TimeseriesPoint = {
@@ -82,10 +88,70 @@ export type TimeseriesPoint = {
   orders: number;
 };
 
+/** Scoped salesperson metrics from get_selected_salespeople_scope_metrics_timeseries (aligns with ScopeFinancialBreakdown). */
+export type SalespeopleScopedFinancialMetrics = {
+  orders_count: number;
+  customers_count: number;
+  /** Same as current_gross_sales (Shopify current totals); kept for callers using `revenue`. */
+  revenue: number;
+  avg_order_value: number;
+  orders_total_count: number;
+  orders_paid_count: number;
+  orders_pending_count: number;
+  orders_refunded_count: number;
+  original_gross_sales: number;
+  current_gross_sales: number;
+  net_sales_ex_vat: number;
+  vat_collected: number;
+  refunded_returned_value: number;
+  avg_order_original_gross: number;
+  avg_order_current_gross: number;
+  avg_order_net_ex_vat: number;
+  orders_missing_current_total: number;
+  series: TimeseriesPoint[];
+};
+
 export type TeamMemberOption = {
   user_id: string;
   label: string;
 };
+
+export type ShopifyOriginalTotalSyncHealth =
+  | { status: "ready" }
+  | { status: "migration_required"; message: string }
+  | { status: "needs_resync"; missing: number; total: number };
+
+/**
+ * Detects whether refund KPIs can align with Shopify: `original_total` column + populated values from sync/webhooks.
+ */
+export function useShopifyOriginalTotalSyncHealth(enabled: boolean) {
+  return useQuery({
+    queryKey: ["shopify-original-total-sync-health"],
+    staleTime: 120_000,
+    enabled,
+    queryFn: async (): Promise<ShopifyOriginalTotalSyncHealth> => {
+      const nonTest = () =>
+        supabase.from("shopify_orders").select("id", { count: "exact", head: true }).or("test_order.is.null,test_order.eq.false");
+
+      const { count: total, error: e1 } = await nonTest();
+      if (e1) throw e1;
+
+      const { count: missing, error: e2 } = await nonTest().is("original_total", null);
+      if (e2) {
+        const msg = [e2.message, (e2 as { details?: string }).details].filter(Boolean).join(" ");
+        if (/original_total|schema cache|does not exist/i.test(msg)) {
+          return { status: "migration_required", message: msg || e2.message };
+        }
+        throw e2;
+      }
+
+      const t = total ?? 0;
+      const m = missing ?? 0;
+      if (t === 0 || m === 0) return { status: "ready" };
+      return { status: "needs_resync", missing: m, total: t };
+    },
+  });
+}
 
 async function withQueryTiming<T>(
   label: string,
@@ -227,11 +293,14 @@ export function useScopeFinancialBreakdown(
           orders_paid_count: 0,
           orders_pending_count: 0,
           orders_refunded_count: 0,
-          gross_revenue: 0,
-          refunded_amount: 0,
-          net_revenue: 0,
-          avg_order_gross: 0,
-          avg_order_net: 0,
+          original_gross_sales: 0,
+          current_gross_sales: 0,
+          net_sales_ex_vat: 0,
+          vat_collected: 0,
+          refunded_returned_value: 0,
+          avg_order_original_gross: 0,
+          avg_order_current_gross: 0,
+          avg_order_net_ex_vat: 0,
           orders_missing_current_total: 0,
         } satisfies ScopeFinancialBreakdown;
       }
@@ -248,11 +317,14 @@ export function useScopeFinancialBreakdown(
         orders_paid_count: Number(row.orders_paid_count || 0),
         orders_pending_count: Number(row.orders_pending_count || 0),
         orders_refunded_count: Number(row.orders_refunded_count || 0),
-        gross_revenue: Number(row.gross_revenue || 0),
-        refunded_amount: Number(row.refunded_amount || 0),
-        net_revenue: Number(row.net_revenue || 0),
-        avg_order_gross: Number(row.avg_order_gross || 0),
-        avg_order_net: Number(row.avg_order_net || 0),
+        original_gross_sales: Number(row.original_gross_sales || 0),
+        current_gross_sales: Number(row.current_gross_sales || 0),
+        net_sales_ex_vat: Number(row.net_sales_ex_vat || 0),
+        vat_collected: Number(row.vat_collected || 0),
+        refunded_returned_value: Number(row.refunded_returned_value || 0),
+        avg_order_original_gross: Number(row.avg_order_original_gross || 0),
+        avg_order_current_gross: Number(row.avg_order_current_gross || 0),
+        avg_order_net_ex_vat: Number(row.avg_order_net_ex_vat || 0),
         orders_missing_current_total: Number(row.orders_missing_current_total ?? 0),
       } satisfies ScopeFinancialBreakdown;
     }),
@@ -403,11 +475,14 @@ export function useSalespersonFinancialBreakdown(
         orders_paid_count: Number(row.orders_paid_count || 0),
         orders_pending_count: Number(row.orders_pending_count || 0),
         orders_refunded_count: Number(row.orders_refunded_count || 0),
-        gross_revenue: Number(row.gross_revenue || 0),
-        refunded_amount: Number(row.refunded_amount || 0),
-        net_revenue: Number(row.net_revenue || 0),
-        avg_order_gross: Number(row.avg_order_gross || 0),
-        avg_order_net: Number(row.avg_order_net || 0),
+        original_gross_sales: Number(row.original_gross_sales || 0),
+        current_gross_sales: Number(row.current_gross_sales || 0),
+        net_sales_ex_vat: Number(row.net_sales_ex_vat || 0),
+        vat_collected: Number(row.vat_collected || 0),
+        refunded_returned_value: Number(row.refunded_returned_value || 0),
+        avg_order_original_gross: Number(row.avg_order_original_gross || 0),
+        avg_order_current_gross: Number(row.avg_order_current_gross || 0),
+        avg_order_net_ex_vat: Number(row.avg_order_net_ex_vat || 0),
       }));
     }),
     staleTime: 60_000,
@@ -706,13 +781,15 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   };
   const orderMap = new Map<
     string,
-    { totalOrig: number; totalCurr: number; at: string; status: string }
+    { effOrig: number; effCurr: number; effTax: number; effRefund: number; at: string; status: string }
   >();
   const absorbOrders = (
     rows: {
       id: string;
       total: number | null;
+      original_total: number | null;
       current_total: number | null;
+      total_tax: number | null;
       financial_status: string | null;
       shopify_created_at: string | null;
       created_at: string | null;
@@ -723,13 +800,19 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       const at = row.shopify_created_at || row.created_at;
       if (!at) continue;
       if (!isInRange(at)) continue;
-      const orig = Number(row.total || 0);
-      const curr = row.current_total != null ? Number(row.current_total) : orig;
+      const status = normalizeFinancialStatus(row.financial_status);
+      const voided = status === "voided";
+      const origBase = Number(row.original_total ?? row.total ?? 0);
+      const coalescedCurr =
+        row.current_total != null ? Number(row.current_total) : origBase;
+      const tax = Number(row.total_tax || 0);
       orderMap.set(row.id, {
-        totalOrig: orig,
-        totalCurr: curr,
+        effOrig: voided ? 0 : origBase,
+        effCurr: voided ? 0 : coalescedCurr,
+        effTax: voided ? 0 : tax,
+        effRefund: voided ? 0 : Math.max(0, origBase - coalescedCurr),
         at,
-        status: normalizeFinancialStatus(row.financial_status),
+        status,
       });
     }
   };
@@ -737,7 +820,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   for (const part of splitIntoChunks(customerIds, 200)) {
     const query = supabase
       .from("shopify_orders")
-      .select("id, total, current_total, financial_status, shopify_created_at, created_at")
+      .select("id, total, original_total, current_total, total_tax, financial_status, shopify_created_at, created_at")
       .in("customer_id", part);
     const { data, error } = await query;
     if (error) throw error;
@@ -745,7 +828,9 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       (data ?? []) as {
         id: string;
         total: number | null;
+        original_total: number | null;
         current_total: number | null;
+        total_tax: number | null;
         financial_status: string | null;
         shopify_created_at: string | null;
         created_at: string | null;
@@ -756,7 +841,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   for (const part of splitIntoChunks(shopifyCustomerIds, 200)) {
     const query = supabase
       .from("shopify_orders")
-      .select("id, total, current_total, financial_status, shopify_created_at, created_at")
+      .select("id, total, original_total, current_total, total_tax, financial_status, shopify_created_at, created_at")
       .is("customer_id", null)
       .in("shopify_customer_id", part);
     const { data, error } = await query;
@@ -765,7 +850,9 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       (data ?? []) as {
         id: string;
         total: number | null;
+        original_total: number | null;
         current_total: number | null;
+        total_tax: number | null;
         financial_status: string | null;
         shopify_created_at: string | null;
         created_at: string | null;
@@ -774,16 +861,22 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   }
 
   const seriesMap = new Map<string, TimeseriesPoint & { sortKey: string }>();
-  let grossRevenue = 0;
-  let refundedAmount = 0;
+  let originalGrossSales = 0;
+  let currentGrossSales = 0;
+  let netSalesExVat = 0;
+  let vatCollected = 0;
+  let refundedReturnedValue = 0;
   let ordersCount = 0;
   let ordersPaidCount = 0;
   let ordersPendingCount = 0;
   let ordersRefundedCount = 0;
 
   for (const [, order] of orderMap) {
-    grossRevenue += order.totalOrig;
-    refundedAmount += Math.max(0, order.totalOrig - order.totalCurr);
+    originalGrossSales += order.effOrig;
+    currentGrossSales += order.effCurr;
+    netSalesExVat += order.effCurr - order.effTax;
+    vatCollected += order.effTax;
+    refundedReturnedValue += order.effRefund;
     ordersCount += 1;
     if (order.status === "paid" || order.status === "partially_paid") ordersPaidCount += 1;
     else if (order.status === "refunded" || order.status === "partially_refunded" || order.status === "voided") {
@@ -810,7 +903,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
       });
     }
     const prev = seriesMap.get(key) || { label, revenue: 0, orders: 0, sortKey: key };
-    prev.revenue += order.totalCurr;
+    prev.revenue += order.effCurr;
     prev.orders += 1;
     seriesMap.set(key, prev);
   }
@@ -818,26 +911,27 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
   const series = Array.from(seriesMap.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([, v]) => ({ label: v.label, revenue: v.revenue, orders: v.orders }));
-  const netRevenue = orderMap.size
-    ? Array.from(orderMap.values()).reduce((s, o) => s + o.totalCurr, 0)
-    : 0;
 
   return {
     orders_count: ordersCount,
     customers_count: customersCount,
-    revenue: netRevenue,
-    avg_order_value: ordersCount > 0 ? netRevenue / ordersCount : 0,
+    revenue: currentGrossSales,
+    avg_order_value: ordersCount > 0 ? currentGrossSales / ordersCount : 0,
     orders_total_count: ordersCount,
     orders_paid_count: ordersPaidCount,
     orders_pending_count: ordersPendingCount,
     orders_refunded_count: ordersRefundedCount,
-    gross_revenue: grossRevenue,
-    refunded_amount: refundedAmount,
-    net_revenue: netRevenue,
-    avg_order_gross: ordersCount > 0 ? grossRevenue / ordersCount : 0,
-    avg_order_net: ordersCount > 0 ? netRevenue / ordersCount : 0,
+    original_gross_sales: originalGrossSales,
+    current_gross_sales: currentGrossSales,
+    net_sales_ex_vat: netSalesExVat,
+    vat_collected: vatCollected,
+    refunded_returned_value: refundedReturnedValue,
+    avg_order_original_gross: ordersCount > 0 ? originalGrossSales / ordersCount : 0,
+    avg_order_current_gross: ordersCount > 0 ? currentGrossSales / ordersCount : 0,
+    avg_order_net_ex_vat: ordersCount > 0 ? netSalesExVat / ordersCount : 0,
+    orders_missing_current_total: 0,
     series,
-  };
+  } satisfies SalespeopleScopedFinancialMetrics;
 }
 
 export function useSalespeopleScopedMetricsAndSeries(
@@ -868,14 +962,17 @@ export function useSalespeopleScopedMetricsAndSeries(
           orders_paid_count: 0,
           orders_pending_count: 0,
           orders_refunded_count: 0,
-          gross_revenue: 0,
-          refunded_amount: 0,
-          net_revenue: 0,
-          avg_order_gross: 0,
-          avg_order_net: 0,
+          original_gross_sales: 0,
+          current_gross_sales: 0,
+          net_sales_ex_vat: 0,
+          vat_collected: 0,
+          refunded_returned_value: 0,
+          avg_order_original_gross: 0,
+          avg_order_current_gross: 0,
+          avg_order_net_ex_vat: 0,
           orders_missing_current_total: 0,
           series: [] as TimeseriesPoint[],
-        };
+        } satisfies SalespeopleScopedFinancialMetrics;
       }
       const viewerUserId = (await supabase.auth.getUser()).data.user?.id;
       if (!viewerUserId) {
@@ -888,14 +985,17 @@ export function useSalespeopleScopedMetricsAndSeries(
           orders_paid_count: 0,
           orders_pending_count: 0,
           orders_refunded_count: 0,
-          gross_revenue: 0,
-          refunded_amount: 0,
-          net_revenue: 0,
-          avg_order_gross: 0,
-          avg_order_net: 0,
+          original_gross_sales: 0,
+          current_gross_sales: 0,
+          net_sales_ex_vat: 0,
+          vat_collected: 0,
+          refunded_returned_value: 0,
+          avg_order_original_gross: 0,
+          avg_order_current_gross: 0,
+          avg_order_net_ex_vat: 0,
           orders_missing_current_total: 0,
           series: [] as TimeseriesPoint[],
-        };
+        } satisfies SalespeopleScopedFinancialMetrics;
       }
       const { data, error } = await (supabase as any).rpc("get_selected_salespeople_scope_metrics_timeseries", {
         _viewer_user_id: viewerUserId,
@@ -914,11 +1014,14 @@ export function useSalespeopleScopedMetricsAndSeries(
         orders_paid_count?: number;
         orders_pending_count?: number;
         orders_refunded_count?: number;
-        gross_revenue?: number;
-        refunded_amount?: number;
-        net_revenue?: number;
-        avg_order_gross?: number;
-        avg_order_net?: number;
+        original_gross_sales?: number;
+        current_gross_sales?: number;
+        net_sales_ex_vat?: number;
+        vat_collected?: number;
+        refunded_returned_value?: number;
+        avg_order_original_gross?: number;
+        avg_order_current_gross?: number;
+        avg_order_net_ex_vat?: number;
         orders_missing_current_total?: number;
         series?: Array<{ label?: string; revenue?: number; orders?: number }> | string | null;
       };
@@ -936,18 +1039,21 @@ export function useSalespeopleScopedMetricsAndSeries(
         orders_paid_count: Number(row.orders_paid_count || 0),
         orders_pending_count: Number(row.orders_pending_count || 0),
         orders_refunded_count: Number(row.orders_refunded_count || 0),
-        gross_revenue: Number(row.gross_revenue || 0),
-        refunded_amount: Number(row.refunded_amount || 0),
-        net_revenue: Number(row.net_revenue || 0),
-        avg_order_gross: Number(row.avg_order_gross || 0),
-        avg_order_net: Number(row.avg_order_net || 0),
+        original_gross_sales: Number(row.original_gross_sales || 0),
+        current_gross_sales: Number(row.current_gross_sales || 0),
+        net_sales_ex_vat: Number(row.net_sales_ex_vat || 0),
+        vat_collected: Number(row.vat_collected || 0),
+        refunded_returned_value: Number(row.refunded_returned_value || 0),
+        avg_order_original_gross: Number(row.avg_order_original_gross || 0),
+        avg_order_current_gross: Number(row.avg_order_current_gross || 0),
+        avg_order_net_ex_vat: Number(row.avg_order_net_ex_vat || 0),
         orders_missing_current_total: Number(row.orders_missing_current_total ?? 0),
         series: parsedSeries.map((item) => ({
           label: String(item.label ?? ""),
           revenue: Number(item.revenue || 0),
           orders: Number(item.orders || 0),
         })),
-      };
+      } satisfies SalespeopleScopedFinancialMetrics;
     },
     staleTime: 60_000,
     enabled: enabled && salespersonUserIds.length > 0,
@@ -1053,11 +1159,14 @@ export function useAggregateFinancialBreakdownForViewers(
           orders_paid_count: 0,
           orders_pending_count: 0,
           orders_refunded_count: 0,
-          gross_revenue: 0,
-          refunded_amount: 0,
-          net_revenue: 0,
-          avg_order_gross: 0,
-          avg_order_net: 0,
+          original_gross_sales: 0,
+          current_gross_sales: 0,
+          net_sales_ex_vat: 0,
+          vat_collected: 0,
+          refunded_returned_value: 0,
+          avg_order_original_gross: 0,
+          avg_order_current_gross: 0,
+          avg_order_net_ex_vat: 0,
           orders_missing_current_total: 0,
         } satisfies ScopeFinancialBreakdown;
       }
@@ -1068,21 +1177,21 @@ export function useAggregateFinancialBreakdownForViewers(
       });
       if (error) throw error;
       const row = (data?.[0] ?? {}) as Partial<ScopeFinancialBreakdown>;
-      const totals = {
+      return {
         customers_count: Number(row.customers_count || 0),
         orders_total_count: Number(row.orders_total_count || 0),
         orders_paid_count: Number(row.orders_paid_count || 0),
         orders_pending_count: Number(row.orders_pending_count || 0),
         orders_refunded_count: Number(row.orders_refunded_count || 0),
-        gross_revenue: Number(row.gross_revenue || 0),
-        refunded_amount: Number(row.refunded_amount || 0),
-        net_revenue: Number(row.net_revenue || 0),
+        original_gross_sales: Number(row.original_gross_sales || 0),
+        current_gross_sales: Number(row.current_gross_sales || 0),
+        net_sales_ex_vat: Number(row.net_sales_ex_vat || 0),
+        vat_collected: Number(row.vat_collected || 0),
+        refunded_returned_value: Number(row.refunded_returned_value || 0),
+        avg_order_original_gross: Number(row.avg_order_original_gross || 0),
+        avg_order_current_gross: Number(row.avg_order_current_gross || 0),
+        avg_order_net_ex_vat: Number(row.avg_order_net_ex_vat || 0),
         orders_missing_current_total: Number(row.orders_missing_current_total ?? 0),
-      };
-      return {
-        ...totals,
-        avg_order_gross: totals.orders_total_count > 0 ? totals.gross_revenue / totals.orders_total_count : 0,
-        avg_order_net: totals.orders_total_count > 0 ? totals.net_revenue / totals.orders_total_count : 0,
       } satisfies ScopeFinancialBreakdown;
     },
     staleTime: 60_000,
@@ -1561,11 +1670,16 @@ export function useOrdersTotalRevenue(scopeKey = "global") {
         const to = from + pageSize - 1;
         const { data, error } = await supabase
           .from("shopify_orders")
-          .select("total")
+          .select("total, original_total, current_total")
           .range(from, to);
         if (error) throw error;
         const batch = data ?? [];
-        for (const row of batch) total += Number((row as any).total || 0);
+        for (const row of batch) {
+          const r = row as { total?: number | null; original_total?: number | null; current_total?: number | null };
+          const orig = Number(r.original_total ?? r.total ?? 0);
+          const curr = r.current_total != null ? Number(r.current_total) : orig;
+          total += curr;
+        }
         if (batch.length < pageSize) break;
         from += pageSize;
       }
@@ -1584,7 +1698,7 @@ async function paginateOrderTotalsFiltered(
   let revenue = 0;
   let count = 0;
   while (true) {
-    let q = supabase.from("shopify_orders").select("total");
+    let q = supabase.from("shopify_orders").select("total, original_total, current_total");
     if (fromIso) q = q.gte("shopify_created_at", fromIso);
     if (toIso) q = q.lte("shopify_created_at", toIso);
     const to = offset + pageSize - 1;
@@ -1592,7 +1706,12 @@ async function paginateOrderTotalsFiltered(
     if (error) throw error;
     const batch = data ?? [];
     count += batch.length;
-    for (const row of batch) revenue += Number((row as { total?: number }).total || 0);
+    for (const row of batch) {
+      const r = row as { total?: number | null; original_total?: number | null; current_total?: number | null };
+      const orig = Number(r.original_total ?? r.total ?? 0);
+      const curr = r.current_total != null ? Number(r.current_total) : orig;
+      revenue += curr;
+    }
     if (batch.length < pageSize) break;
     offset += pageSize;
   }
@@ -1648,9 +1767,17 @@ export function useOrdersTimeseriesInRange(
     queryFn: async () => {
       const pageSize = 1000;
       let offset = 0;
-      const rows: { shopify_created_at: string | null; created_at: string | null; total: number | null }[] = [];
+      const rows: {
+        shopify_created_at: string | null;
+        created_at: string | null;
+        total: number | null;
+        original_total: number | null;
+        current_total: number | null;
+      }[] = [];
       while (true) {
-        let q = supabase.from("shopify_orders").select("shopify_created_at, created_at, total");
+        let q = supabase
+          .from("shopify_orders")
+          .select("shopify_created_at, created_at, total, original_total, current_total");
         if (fromIso) q = q.gte("shopify_created_at", fromIso);
         if (toIso) q = q.lte("shopify_created_at", toIso);
         const to = offset + pageSize - 1;
@@ -1684,7 +1811,9 @@ export function useOrdersTimeseriesInRange(
           });
         }
         const prev = map.get(key) || { revenue: 0, orders: 0, label, sortKey: key };
-        prev.revenue += Number(row.total || 0);
+        const orig = Number(row.original_total ?? row.total ?? 0);
+        const curr = row.current_total != null ? Number(row.current_total) : orig;
+        prev.revenue += curr;
         prev.orders += 1;
         map.set(key, prev);
       }
@@ -2346,9 +2475,14 @@ export function usePurchaseOrdersPaginated(params: PurchaseOrdersQueryParams) {
 
 export type ShopifySyncModule = "customers" | "orders" | "products" | "collections" | "purchase_orders";
 
-/** Clears the customers incremental window so the next run re-upserts all customers (up to page limits per run). */
+/**
+ * Optional sync flags passed to the shopify-sync edge function.
+ * - reset_customer_checkpoint: re-walk customers from newest (clears incremental updatedAt window).
+ * - reset_orders_checkpoint: re-walk orders from newest (clears incremental window; backfills e.g. original_total).
+ */
 export type TriggerSyncOptions = {
   reset_customer_checkpoint?: boolean;
+  reset_orders_checkpoint?: boolean;
 };
 
 async function assertLicenseActive() {
@@ -2381,6 +2515,7 @@ export async function triggerSync(module?: ShopifySyncModule, options?: TriggerS
       body: {
         ...(module ? { module } : {}),
         ...(options?.reset_customer_checkpoint ? { reset_customer_checkpoint: true } : {}),
+        ...(options?.reset_orders_checkpoint ? { reset_orders_checkpoint: true } : {}),
       },
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -2424,6 +2559,8 @@ function moduleUpToDate(mod?: SyncModuleResult) {
 export type TriggerSyncUntilUpToDateOptions = {
   /** First run only: clears customers checkpoint so incremental updatedAt window does not skip everyone. */
   resetCustomerCheckpointFirstRun?: boolean;
+  /** First run only: clears orders checkpoint so incremental window does not skip re-fetching existing orders. */
+  resetOrdersCheckpointFirstRun?: boolean;
 };
 
 export async function triggerSyncUntilUpToDate(
@@ -2438,7 +2575,16 @@ export async function triggerSyncUntilUpToDate(
     runs++;
     const resetCustomer =
       untilOptions?.resetCustomerCheckpointFirstRun === true && runs === 1 && module === "customers";
-    lastResult = await triggerSync(module, resetCustomer ? { reset_customer_checkpoint: true } : undefined);
+    const resetOrders =
+      untilOptions?.resetOrdersCheckpointFirstRun === true && runs === 1 && module === "orders";
+    lastResult = await triggerSync(
+      module,
+      resetCustomer
+        ? { reset_customer_checkpoint: true }
+        : resetOrders
+          ? { reset_orders_checkpoint: true }
+          : undefined,
+    );
     const r = lastResult?.results || {};
     if (module) {
       if (moduleUpToDate(r[module])) {

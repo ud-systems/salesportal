@@ -149,6 +149,26 @@ export default function SyncLogsPage() {
     }
   };
 
+  /** Clears the orders incremental checkpoint once, then auto-runs orders until pages complete or max runs (backfills original_total / pricing after code changes). */
+  const handleFullOrdersResync = async () => {
+    setSyncing(true);
+    try {
+      const out = await triggerSyncUntilUpToDate(20, "orders", { resetOrdersCheckpointFirstRun: true });
+      const r = out?.result?.results?.orders;
+      const note = r?.note ? ` · ${r.note}` : "";
+      toast.success(out.completed ? "Orders rebuild finished" : "Orders rebuild paused at max runs", {
+        description: `Runs: ${out.runs} · Synced: ${r?.synced ?? 0}${note}`,
+      });
+      queryClient.invalidateQueries();
+    } catch (err) {
+      toast.error("Orders rebuild failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const statusIcon = (status: string) => {
     switch (status) {
       case "success": return <CheckCircle className="h-4 w-4 text-primary" />;
@@ -215,6 +235,16 @@ export default function SyncLogsPage() {
             {syncing ? "…" : "Full customer resync (reset incremental window)"}
           </Button>
         )}
+        {selectedModule === "orders" && (
+          <Button
+            disabled={syncing}
+            variant="secondary"
+            className="rounded-xl tap-scale font-body w-full sm:w-auto sm:self-start"
+            onClick={handleFullOrdersResync}
+          >
+            {syncing ? "…" : "Rebuild order totals (reset orders incremental window)"}
+          </Button>
+        )}
       </div>
 
       {isMobile ? (
@@ -231,6 +261,11 @@ export default function SyncLogsPage() {
               <strong className="text-foreground">Customers</strong> sync skips everyone whose Shopify <code className="text-xs">updatedAt</code> is older than your last completed customer run (incremental). If you see “Synced: 0” but need to refresh metafields or assignments, select Customers and use{" "}
               <strong className="text-foreground">Full customer resync</strong>, or in Supabase SQL run:{" "}
               <code className="text-xs break-all">update sync_checkpoints set last_completed_at = null, cursor = null where sync_type = &apos;customers&apos;;</code>
+            </p>
+            <p>
+              <strong className="text-foreground">Orders</strong> sync uses the same idea on Shopify <code className="text-xs">updatedAt</code>. Routine syncs often show <strong className="text-foreground">Synced: 0</strong> even when you need to backfill new DB columns (for example <code className="text-xs">original_total</code>). Select Orders and use{" "}
+              <strong className="text-foreground">Rebuild order totals</strong>, or SQL:{" "}
+              <code className="text-xs break-all">update sync_checkpoints set last_completed_at = null, cursor = null where sync_type = &apos;orders&apos;;</code>
             </p>
           </div>
         </BottomSheet>
@@ -252,6 +287,11 @@ export default function SyncLogsPage() {
                 <strong className="text-foreground">Customers</strong> sync skips everyone whose Shopify <code className="text-xs">updatedAt</code> is older than your last completed customer run (incremental). If you see “Synced: 0” but need to refresh metafields or assignments, select Customers and use{" "}
                 <strong className="text-foreground">Full customer resync</strong>, or in Supabase SQL run:{" "}
                 <code className="text-xs break-all">update sync_checkpoints set last_completed_at = null, cursor = null where sync_type = &apos;customers&apos;;</code>
+              </p>
+              <p>
+                <strong className="text-foreground">Orders</strong> sync uses the same idea on Shopify <code className="text-xs">updatedAt</code>. Routine syncs often show <strong className="text-foreground">Synced: 0</strong> even when you need to backfill new DB columns (for example <code className="text-xs">original_total</code>). Select Orders and use{" "}
+                <strong className="text-foreground">Rebuild order totals</strong>, or SQL:{" "}
+                <code className="text-xs break-all">update sync_checkpoints set last_completed_at = null, cursor = null where sync_type = &apos;orders&apos;;</code>
               </p>
             </div>
           </SheetContent>

@@ -197,6 +197,7 @@ export type Database = {
           id: string
           order_note: string | null
           order_number: string | null
+          original_total: number | null
           processed_at: string | null
           shopify_created_at: string | null
           shopify_customer_id: string | null
@@ -220,6 +221,7 @@ export type Database = {
           id?: string
           order_note?: string | null
           order_number?: string | null
+          original_total?: number | null
           processed_at?: string | null
           shopify_created_at?: string | null
           shopify_customer_id?: string | null
@@ -243,6 +245,7 @@ export type Database = {
           id?: string
           order_note?: string | null
           order_number?: string | null
+          original_total?: number | null
           processed_at?: string | null
           shopify_created_at?: string | null
           shopify_customer_id?: string | null
@@ -654,6 +657,33 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      get_admin_order_financial_reconciliation_candidates: {
+        Args: {
+          _from_iso: string
+          _to_iso: string
+          _only_flagged?: boolean
+          _max_rows?: number
+        }
+        Returns: {
+          order_id: string
+          shopify_order_id: string
+          order_number: string | null
+          shopify_created_at: string | null
+          financial_status: string | null
+          status_norm: string | null
+          total: number | null
+          original_total: number | null
+          current_total: number | null
+          subtotal: number | null
+          total_tax: number | null
+          eff_orig: number | null
+          eff_curr: number | null
+          eff_tax: number | null
+          crm_refunded_returned_value: number | null
+          missing_current_total: boolean | null
+          flag_reasons: string | null
+        }[]
       }
     }
     Enums: {

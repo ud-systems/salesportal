@@ -1,4 +1,4 @@
-import { PoundSterling, Users, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
+import { Users, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import {
   useRecentOrders,
@@ -22,7 +22,7 @@ import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { useAuth } from "@/contexts/AuthContext";
-import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
+import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
 import { OrdersMetricsGroupCard } from "@/components/OrdersMetricsGroupCard";
 
 const TOP_SALES_BAR_COLORS = [
@@ -114,9 +114,7 @@ export default function AdminDashboardPage() {
     "admin",
     !isAll,
   );
-  const grossRevenue = isAll ? (allBreakdown?.gross_revenue ?? 0) : (rangeBreakdown?.gross_revenue ?? 0);
-  const refundedAmount = isAll ? (allBreakdown?.refunded_amount ?? 0) : (rangeBreakdown?.refunded_amount ?? 0);
-  const netRevenue = isAll ? (allBreakdown?.net_revenue ?? 0) : (rangeBreakdown?.net_revenue ?? 0);
+  const currentGross = isAll ? (allBreakdown?.current_gross_sales ?? 0) : (rangeBreakdown?.current_gross_sales ?? 0);
   const totalOrders = isAll ? (allBreakdown?.orders_total_count ?? 0) : (rangeBreakdown?.orders_total_count ?? 0);
   const paidOrders = isAll ? (allBreakdown?.orders_paid_count ?? 0) : (rangeBreakdown?.orders_paid_count ?? 0);
   const refundedOrders = isAll ? (allBreakdown?.orders_refunded_count ?? 0) : (rangeBreakdown?.orders_refunded_count ?? 0);
@@ -128,9 +126,9 @@ export default function AdminDashboardPage() {
   const unfulfilledOrders = isAll ? unfulfilledOrdersAll : unfulfilledOrdersRange;
   const loadingUnfulfilled = isAll ? loadingUnfulfilledAll : loadingUnfulfilledRange;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
-  const prevRevenue = compareBreakdown?.gross_revenue ?? 0;
+  const prevCurrentGross = compareBreakdown?.current_gross_sales ?? 0;
   const revDelta =
-    !isAll && prevRevenue > 0 ? (((grossRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
+    !isAll && prevCurrentGross > 0 ? (((currentGross - prevCurrentGross) / prevCurrentGross) * 100).toFixed(1) : null;
   const barChartData = useMemo(
     () => series.map((p) => ({ month: p.label, revenue: p.revenue, orders: p.orders })),
     [series],
@@ -187,9 +185,11 @@ export default function AdminDashboardPage() {
       salespersonPerformance.map((sp) => ({
         name: sp.salesperson_name.split(" ")[0],
         fullName: sp.salesperson_name,
-        grossRevenue: Number(sp.gross_revenue || 0),
-        refundedAmount: Number(sp.refunded_amount || 0),
-        netRevenue: Number(sp.net_revenue || 0),
+        grossRevenue: Number(sp.original_gross_sales || 0),
+        refundedAmount: Number(sp.refunded_returned_value || 0),
+        netRevenue: Number(sp.current_gross_sales || 0),
+        netSalesExVat: Number(sp.net_sales_ex_vat || 0),
+        vatCollected: Number(sp.vat_collected || 0),
         ordersTotal: Number(sp.orders_total_count || 0),
         ordersPaid: Number(sp.orders_paid_count || 0),
         ordersRefunded: Number(sp.orders_refunded_count || 0),
@@ -291,7 +291,7 @@ export default function AdminDashboardPage() {
         {!isAll && (
           <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
             vs previous equivalent period
-            {revDelta != null ? ` · Revenue ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
+            {revDelta != null ? ` · Current gross sales ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
           </p>
         )}
       </div>
@@ -358,35 +358,19 @@ export default function AdminDashboardPage() {
       )}
 
       <div className="space-y-3 lg:space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
-          <GrossNetRevenueCard
-            gross={grossRevenue}
-            net={netRevenue}
-            currency={currency}
-            loading={loadingRevenueTotal}
-            delay={50}
-            info={
-              <>
-                <span className="font-medium text-foreground">Net</span> is the sum of current order totals after returns (Shopify currentTotal), organization-wide.
-                <span className="block mt-1">
-                  <span className="font-medium text-foreground">Gross</span> is the sum of original totals before returns (totalPriceSet), all non-test orders in scope.
-                </span>
-              </>
-            }
-          />
-          <KpiCard
-            title="Refunded Amount"
-            value={loadingRevenueTotal ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(refundedAmount, null, currency)}
-            icon={PoundSterling}
-            info="Returns and adjustments: original total minus current total per order."
-            delay={90}
-          />
+        <RetailFinancialKpiSection
+          metrics={isAll ? allBreakdown : rangeBreakdown}
+          loading={loadingRevenueTotal}
+          currency={currency}
+          delayBase={40}
+        />
+        <div className="grid grid-cols-1 sm:max-w-sm">
           <KpiCard
             title="Registered Customers"
             value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
             icon={Users}
             info="Scoped registered customers in the selected period (customer created-at filter)."
-            delay={150}
+            delay={120}
           />
         </div>
         <OrdersMetricsGroupCard
@@ -420,7 +404,7 @@ export default function AdminDashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
                   <YAxis width={48} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => formatCompactMoney(v, currency)} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Revenue"]} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Current gross"]} />
                   <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -429,7 +413,7 @@ export default function AdminDashboardPage() {
         </div>
         {!loadingSalespersonPerformance && salesBySP.length > 0 && (
           <div className="card-float p-5 h-full opacity-0 animate-fade-in" style={{ animationDelay: "300ms" }}>
-            <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 Salesperson Net Revenue Progress</h3>
+            <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 by current gross sales</h3>
             <div className="space-y-3">
               {topSalesRows.map((sp, idx) => {
                 const widthPct = Math.max(4, Math.round((Number(sp.netRevenue || 0) / topSalesMaxRevenue) * 100));
@@ -476,7 +460,7 @@ export default function AdminDashboardPage() {
           </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm font-body">
-              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Registered Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Gross</th><th className="text-right py-2.5 font-medium">Refund Amt</th><th className="text-right py-2.5 font-medium">Net</th></tr></thead>
+              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Registered Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Original gross</th><th className="text-right py-2.5 font-medium">Current gross</th><th className="text-right py-2.5 font-medium">Net ex VAT</th><th className="text-right py-2.5 font-medium">VAT</th><th className="text-right py-2.5 font-medium">Refunded value</th></tr></thead>
               <tbody>
                 {pagedSalesRows.map((sp) => {
                   return (
@@ -498,8 +482,10 @@ export default function AdminDashboardPage() {
                       <td className="py-3 text-right font-medium text-foreground">{sp.ordersPaid}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.ordersRefunded}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.grossRevenue, null, currency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.refundedAmount, null, currency)}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.netSalesExVat, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.vatCollected, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.refundedAmount, null, currency)}</td>
                     </tr>
                   );
                 })}
@@ -513,7 +499,7 @@ export default function AdminDashboardPage() {
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>
                   <div className="flex justify-between text-xs font-body text-muted-foreground mt-1">
                     <span>{sp.custCount} registered customers · {sp.ordersTotal} orders</span>
-                    <span className="font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)} net</span>
+                    <span className="font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)} current gross</span>
                   </div>
                 </div>
               );

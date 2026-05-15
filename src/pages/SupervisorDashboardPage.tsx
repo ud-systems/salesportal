@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ShoppingCart, PoundSterling } from "lucide-react";
+import { ShoppingCart } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
-import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
+import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -401,26 +401,21 @@ export default function SupervisorDashboardPage() {
       {compareEnabled && scopeMode !== "all" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Selected Scope Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.gross_revenue || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Selected scope current gross</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.current_gross_sales || 0, null, currency)}</p>
           </div>
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Full Scope Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.gross_revenue || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Full scope current gross</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.current_gross_sales || 0, null, currency)}</p>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <GrossNetRevenueCard
-          gross={metrics?.gross_revenue || 0}
-          net={metrics?.net_revenue || 0}
-          currency={currency}
-          loading={loadingMetrics}
-          delay={50}
-        />
-        <KpiCard title="Refunded Amount" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.refunded_amount || 0, null, currency)} icon={PoundSterling} info="Returns and adjustments: original minus current total per order." delay={150} />
-        <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
+      <div className="space-y-3">
+        <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
+        <div className="grid grid-cols-1 sm:max-w-xs">
+          <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
+        </div>
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">

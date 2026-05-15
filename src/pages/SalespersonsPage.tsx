@@ -81,9 +81,11 @@ export default function SalespersonsPage() {
         orders: Number(sp.orders_total_count || 0),
         paidOrders: Number(sp.orders_paid_count || 0),
         refundedOrders: Number(sp.orders_refunded_count || 0),
-        grossRevenue: Number(sp.gross_revenue || 0),
-        refundAmount: Number(sp.refunded_amount || 0),
-        netRevenue: Number(sp.net_revenue || 0),
+        originalGross: Number(sp.original_gross_sales || 0),
+        currentGross: Number(sp.current_gross_sales || 0),
+        netExVat: Number(sp.net_sales_ex_vat || 0),
+        vatCollected: Number(sp.vat_collected || 0),
+        refundedReturned: Number(sp.refunded_returned_value || 0),
       })),
     [salespersons],
   );
@@ -104,10 +106,12 @@ export default function SalespersonsPage() {
       "Registered Customers",
       "Orders",
       "Paid",
-      "Refunded",
-      `Gross (${storeCurrency})`,
-      `Refund Amount (${storeCurrency})`,
-      `Net (${storeCurrency})`,
+      "Refunded orders",
+      `Original gross (${storeCurrency})`,
+      `Current gross (${storeCurrency})`,
+      `Net sales ex VAT (${storeCurrency})`,
+      `VAT collected (${storeCurrency})`,
+      `Refunded / returned (${storeCurrency})`,
     ],
     [storeCurrency],
   );
@@ -125,9 +129,11 @@ export default function SalespersonsPage() {
         sp.orders,
         sp.paidOrders,
         sp.refundedOrders,
-        Number(sp.grossRevenue.toFixed(2)),
-        Number(sp.refundAmount.toFixed(2)),
-        Number(sp.netRevenue.toFixed(2)),
+        Number(sp.originalGross.toFixed(2)),
+        Number(sp.currentGross.toFixed(2)),
+        Number(sp.netExVat.toFixed(2)),
+        Number(sp.vatCollected.toFixed(2)),
+        Number(sp.refundedReturned.toFixed(2)),
       ]);
       const csv = rowsToCsv(exportColumns, body);
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -166,9 +172,11 @@ export default function SalespersonsPage() {
         sp.orders,
         sp.paidOrders,
         sp.refundedOrders,
-        formatOrderMoney(sp.grossRevenue, null, storeCurrency),
-        formatOrderMoney(sp.refundAmount, null, storeCurrency),
-        formatOrderMoney(sp.netRevenue, null, storeCurrency),
+        formatOrderMoney(sp.originalGross, null, storeCurrency),
+        formatOrderMoney(sp.currentGross, null, storeCurrency),
+        formatOrderMoney(sp.netExVat, null, storeCurrency),
+        formatOrderMoney(sp.vatCollected, null, storeCurrency),
+        formatOrderMoney(sp.refundedReturned, null, storeCurrency),
       ]);
       autoTable(doc, {
         startY: 32,
@@ -319,9 +327,11 @@ export default function SalespersonsPage() {
                     <th className="text-right py-2.5 font-medium">Orders</th>
                     <th className="text-right py-2.5 font-medium">Paid</th>
                     <th className="text-right py-2.5 font-medium">Refunded</th>
-                    <th className="text-right py-2.5 font-medium">Gross</th>
-                    <th className="text-right py-2.5 font-medium">Refund Amt</th>
-                    <th className="text-right py-2.5 font-medium">Net</th>
+                    <th className="text-right py-2.5 font-medium">Original gross</th>
+                    <th className="text-right py-2.5 font-medium">Current gross</th>
+                    <th className="text-right py-2.5 font-medium">Net ex VAT</th>
+                    <th className="text-right py-2.5 font-medium">VAT</th>
+                    <th className="text-right py-2.5 font-medium">Refunded / ret.</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -344,9 +354,11 @@ export default function SalespersonsPage() {
                       <td className="py-3 text-right font-medium text-foreground">{sp.orders}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.paidOrders}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.refundedOrders}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.grossRevenue), null, storeCurrency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.refundAmount), null, storeCurrency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.netRevenue), null, storeCurrency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.originalGross), null, storeCurrency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.currentGross), null, storeCurrency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.netExVat), null, storeCurrency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.vatCollected), null, storeCurrency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.refundedReturned), null, storeCurrency)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -370,7 +382,7 @@ export default function SalespersonsPage() {
                     <h3 className="font-heading font-semibold text-foreground truncate">{sp.name}</h3>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <Users className="h-4 w-4 text-primary mx-auto mb-1" />
                     <p className="text-lg font-heading font-bold text-foreground">{sp.customers}</p>
@@ -383,13 +395,15 @@ export default function SalespersonsPage() {
                   </div>
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <PoundSterling className="h-4 w-4 text-primary mx-auto mb-1" />
-                    <p className="text-lg font-heading font-bold text-foreground">{formatOrderMoney(Number(sp.netRevenue), null, storeCurrency)}</p>
-                    <p className="text-[10px] text-muted-foreground font-body">Net Revenue</p>
+                    <p className="text-lg font-heading font-bold text-foreground">{formatOrderMoney(Number(sp.currentGross), null, storeCurrency)}</p>
+                    <p className="text-[10px] text-muted-foreground font-body">Current gross sales</p>
                   </div>
                 </div>
-                <div className="mt-3 flex justify-between text-[11px] text-muted-foreground font-body">
-                  <span>Gross: {formatOrderMoney(Number(sp.grossRevenue), null, storeCurrency)}</span>
-                  <span>Refund: {formatOrderMoney(Number(sp.refundAmount), null, storeCurrency)}</span>
+                <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-body">
+                  <span>Original gross: {formatOrderMoney(Number(sp.originalGross), null, storeCurrency)}</span>
+                  <span>Net ex VAT: {formatOrderMoney(Number(sp.netExVat), null, storeCurrency)}</span>
+                  <span>VAT: {formatOrderMoney(Number(sp.vatCollected), null, storeCurrency)}</span>
+                  <span>Refunded / returned: {formatOrderMoney(Number(sp.refundedReturned), null, storeCurrency)}</span>
                 </div>
               </div>
             ))}

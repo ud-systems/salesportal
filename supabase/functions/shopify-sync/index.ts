@@ -16,6 +16,7 @@ import {
   SP_ASSIGNED_METAFIELD_KEYS_ORDERED,
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
+import { mapShopifyOrderMoneyFields } from "../_shared/shopify-order-totals.ts";
 
 const isDev = (Deno.env.get("ENV") || Deno.env.get("DENO_ENV") || "").toLowerCase() === "development";
 const devError = (...args: unknown[]) => {
@@ -191,6 +192,8 @@ Deno.serve(async (req) => {
   await assertDataPulseLicenseActive(supabase);
   const requestBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
   const resetCustomerCheckpoint = requestBody?.reset_customer_checkpoint === true;
+  /** Clears orders checkpoint so the next run walks newest-first without the updatedAt incremental cutoff (backfills e.g. original_total after schema changes). */
+  const resetOrdersCheckpoint = requestBody?.reset_orders_checkpoint === true;
   const requestedModule = typeof requestBody?.module === "string" ? requestBody.module : null;
   const allowedModules = new Set(["customers", "orders", "products", "collections", "purchase_orders"]);
   if (requestedModule && !allowedModules.has(requestedModule)) {
@@ -576,6 +579,19 @@ Deno.serve(async (req) => {
     ordersLogId = crypto.randomUUID();
     await supabase.from("sync_logs").insert({ id: ordersLogId, sync_type: "orders", status: "running" });
 
+    if (resetOrdersCheckpoint) {
+      const { error: resetOrdErr } = await supabase.from("sync_checkpoints").upsert(
+        {
+          sync_type: "orders",
+          cursor: null,
+          last_completed_at: null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "sync_type" },
+      );
+      if (resetOrdErr) devError("reset_orders_checkpoint upsert failed:", resetOrdErr.message);
+    }
+
     const { data: customerRows } = await supabase.from("shopify_customers").select("id, shopify_customer_id");
     const customerIdByShopify = new Map(
       (customerRows || []).map((r: { id: string; shopify_customer_id: string }) => [r.shopify_customer_id, r.id]),
@@ -619,6 +635,7 @@ Deno.serve(async (req) => {
               subtotalPriceSet { shopMoney { amount } }
               currentTotalTaxSet { shopMoney { amount } }
               totalPriceSet { shopMoney { amount currencyCode } }
+              originalTotalPriceSet { shopMoney { amount } }
               currentTotalPriceSet { shopMoney { amount currencyCode } }
               customer { id displayName defaultEmailAddress { emailAddress } }
               lineItems(first: 100) {
@@ -697,6 +714,7 @@ Deno.serve(async (req) => {
         } else {
           updatedOrders++;
         }
+        const money = mapShopifyOrderMoneyFields(o);
         const row = {
           shopify_order_id: shopifyOrderId,
           order_number: o.name,
@@ -704,8 +722,9 @@ Deno.serve(async (req) => {
           shopify_customer_id: shopifyCustomerId,
           customer_name: custName,
           email: o.email || custEmail,
-          total: parseFloat(o.totalPriceSet?.shopMoney?.amount || "0"),
-          current_total: parseFloat(o.currentTotalPriceSet?.shopMoney?.amount ?? o.totalPriceSet?.shopMoney?.amount ?? "0"),
+          total: money.total,
+          original_total: money.original_total,
+          current_total: money.current_total,
           currency_code: o.currencyCode || o.totalPriceSet?.shopMoney?.currencyCode || null,
           subtotal: parseFloat(o.subtotalPriceSet?.shopMoney?.amount || "0") || null,
           total_tax: parseFloat(o.currentTotalTaxSet?.shopMoney?.amount || "0") || null,
@@ -810,7 +829,9 @@ Deno.serve(async (req) => {
         : hasNextPage
           ? `Stopped at ${MAX_ORDER_PAGES} pages; run sync again to pull more orders.`
           : totalSynced === 0
-            ? "Already up to date (no new order changes)."
+            ? orderCutoffMs
+              ? "Incremental window: no Shopify order updatedAt is newer than your last completed orders sync (minus 5 min), so nothing was re-imported. Use reset_orders_checkpoint / “Rebuild order totals” to walk orders again (e.g. after original_total or pricing field changes)."
+              : "Already up to date (no order rows in this run)."
             : undefined,
       `Orders processed: ${totalSynced} (new: ${insertedOrders}, updated: ${updatedOrders}). Per page: new rows upserted before updates.`,
       checkpointUnavailable ? checkpointNote : undefined,

@@ -25,6 +25,13 @@ import { getDashboardRange, toLocalYmd, type DatePreset } from "@/lib/dashboard-
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { useAuth } from "@/contexts/AuthContext";
 
+/** Shopify current total after returns/refunds; falls back to legacy `total` when not synced. */
+function orderDisplayTotal(order: { current_total?: number | null; total?: number | null }) {
+  const c = order.current_total;
+  if (c != null && Number.isFinite(Number(c))) return Number(c);
+  return Number(order.total || 0);
+}
+
 export default function OrdersPage() {
   const { user, isAdmin, isSupervisor, isManager } = useAuth();
   const isLeader = isSupervisor || isManager;
@@ -265,7 +272,7 @@ export default function OrdersPage() {
   const orders = data?.data ?? [];
   const ordersVisible = useMemo(() => {
     if (quickRankFilter === "all") return orders;
-    const ranked = [...orders].sort((a, b) => Number(b.total || 0) - Number(a.total || 0));
+    const ranked = [...orders].sort((a, b) => orderDisplayTotal(b) - orderDisplayTotal(a));
     return quickRankFilter === "top3" ? ranked.slice(0, 3) : ranked.slice(-3);
   }, [orders, quickRankFilter]);
   const totalCount = data?.count ?? 0;
@@ -504,7 +511,7 @@ export default function OrdersPage() {
                       <td className="py-3 font-medium text-foreground">{o.order_number || o.shopify_order_id}</td>
                       <td className="py-3 text-muted-foreground">{o.customer_name}</td>
                       <td className="py-3 text-right font-medium text-foreground">
-                        {formatOrderMoney(Number(o.total), o.currency_code, storeCurrency)}
+                        {formatOrderMoney(orderDisplayTotal(o), o.currency_code, storeCurrency)}
                       </td>
                       <td className="py-3"><StatusBadge status={(o.financial_status || "pending") as any} /></td>
                       <td className="py-3"><StatusBadge status={(o.fulfillment_status || "unfulfilled") as any} /></td>
@@ -528,7 +535,7 @@ export default function OrdersPage() {
                 <div className="flex items-start justify-between mb-2">
                   <div><p className="font-medium text-foreground text-sm">{o.order_number || o.shopify_order_id}</p><p className="text-xs text-muted-foreground mt-0.5">{o.customer_name}</p></div>
                   <p className="font-heading font-bold text-foreground">
-                    {formatOrderMoney(Number(o.total), o.currency_code, storeCurrency)}
+                    {formatOrderMoney(orderDisplayTotal(o), o.currency_code, storeCurrency)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
@@ -585,7 +592,7 @@ export default function OrdersPage() {
                 <p className="text-muted-foreground">{selectedOrder.customer_name || "Unknown customer"} · {selectedOrder.email || "No email"}</p>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Total</p><p className="font-semibold">{formatOrderMoney(Number(selectedOrder.total || 0), selectedOrder.currency_code, storeCurrency)}</p></div>
+                <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Total</p><p className="font-semibold">{formatOrderMoney(orderDisplayTotal(selectedOrder), selectedOrder.currency_code, storeCurrency)}</p></div>
                 <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Subtotal</p><p className="font-semibold">{formatOrderMoney(Number(selectedOrder.subtotal || 0), selectedOrder.currency_code, storeCurrency)}</p></div>
                 <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Tax</p><p className="font-semibold">{formatOrderMoney(Number(selectedOrder.total_tax || 0), selectedOrder.currency_code, storeCurrency)}</p></div>
               </div>

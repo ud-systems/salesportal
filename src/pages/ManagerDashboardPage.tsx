@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart, PoundSterling } from "lucide-react";
+import { Users, ShoppingCart } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
-import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
+import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -93,10 +93,8 @@ export default function ManagerDashboardPage() {
 
   const { data: teamMemberOptions = [] } = useManagerTeamMemberOptions(user?.id, scopeKey);
   /**
-   * Use the financial-breakdown RPC so the table can show both Gross and Net
-   * revenue per salesperson (the legacy get_salesperson_performance_rows only
-   * returned a single net-style "revenue" column). Both RPCs are filtered to
-   * exclude leaders so the manager themselves never leaks in here.
+   * Use the financial-breakdown RPC so the table can show original gross, current gross,
+   * net ex VAT, VAT, and refunded/returned value per salesperson.
    */
   const { data: teamBreakdownRows = [], isLoading: loadingTeam } = useSalespersonFinancialBreakdown(
     `manager-${user?.id ?? "none"}-team-breakdown`,
@@ -172,8 +170,11 @@ export default function ManagerDashboardPage() {
     salesperson_name: string;
     customers_count: number;
     orders_total_count: number;
-    gross_revenue: number;
-    net_revenue: number;
+    original_gross_sales: number;
+    current_gross_sales: number;
+    net_sales_ex_vat: number;
+    vat_collected: number;
+    refunded_returned_value: number;
   };
 
   const teamRows = useMemo<BreakdownRow[]>(
@@ -183,8 +184,11 @@ export default function ManagerDashboardPage() {
         salesperson_name: row.salesperson_name,
         customers_count: Number(row.customers_count || 0),
         orders_total_count: Number(row.orders_total_count || 0),
-        gross_revenue: Number(row.gross_revenue || 0),
-        net_revenue: Number(row.net_revenue || 0),
+        original_gross_sales: Number(row.original_gross_sales || 0),
+        current_gross_sales: Number(row.current_gross_sales || 0),
+        net_sales_ex_vat: Number(row.net_sales_ex_vat || 0),
+        vat_collected: Number(row.vat_collected || 0),
+        refunded_returned_value: Number(row.refunded_returned_value || 0),
       })),
     [teamBreakdownRows],
   );
@@ -196,8 +200,11 @@ export default function ManagerDashboardPage() {
       salesperson_name: user.salesperson_name?.trim() || user.name || "Me",
       customers_count: Number(selfMetrics?.customers_count || 0),
       orders_total_count: Number(selfMetrics?.orders_total_count || selfMetrics?.orders_count || 0),
-      gross_revenue: Number(selfMetrics?.gross_revenue || 0),
-      net_revenue: Number(selfMetrics?.net_revenue || selfMetrics?.revenue || 0),
+      original_gross_sales: Number(selfMetrics?.original_gross_sales || 0),
+      current_gross_sales: Number(selfMetrics?.current_gross_sales || selfMetrics?.revenue || 0),
+      net_sales_ex_vat: Number(selfMetrics?.net_sales_ex_vat || 0),
+      vat_collected: Number(selfMetrics?.vat_collected || 0),
+      refunded_returned_value: Number(selfMetrics?.refunded_returned_value || 0),
     };
   }, [user?.id, user?.name, user?.salesperson_name, selfMetrics]);
 
@@ -219,7 +226,7 @@ export default function ManagerDashboardPage() {
   const quickScopedIds = useMemo(() => {
     if (quickMemberFilter === "all") return null;
     const ranked = [...baseRowsForScope].sort(
-      (a, b) => Number(b.gross_revenue || 0) - Number(a.gross_revenue || 0),
+      (a, b) => Number(b.current_gross_sales || 0) - Number(a.current_gross_sales || 0),
     );
     const sliced = quickMemberFilter === "top3" ? ranked.slice(0, 3) : ranked.slice(-3);
     return new Set(sliced.map((r) => r.salesperson_user_id));
@@ -243,11 +250,22 @@ export default function ManagerDashboardPage() {
       (acc, row) => {
         acc.customers_count += Number(row.customers_count || 0);
         acc.orders_total_count += Number(row.orders_total_count || 0);
-        acc.gross_revenue += Number(row.gross_revenue || 0);
-        acc.net_revenue += Number(row.net_revenue || 0);
+        acc.original_gross_sales += Number(row.original_gross_sales || 0);
+        acc.current_gross_sales += Number(row.current_gross_sales || 0);
+        acc.net_sales_ex_vat += Number(row.net_sales_ex_vat || 0);
+        acc.vat_collected += Number(row.vat_collected || 0);
+        acc.refunded_returned_value += Number(row.refunded_returned_value || 0);
         return acc;
       },
-      { customers_count: 0, orders_total_count: 0, gross_revenue: 0, net_revenue: 0 },
+      {
+        customers_count: 0,
+        orders_total_count: 0,
+        original_gross_sales: 0,
+        current_gross_sales: 0,
+        net_sales_ex_vat: 0,
+        vat_collected: 0,
+        refunded_returned_value: 0,
+      },
     );
   }, [filteredTeamRows]);
 
@@ -339,26 +357,21 @@ export default function ManagerDashboardPage() {
       {compareEnabled && scopeMode !== "team" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Selected Scope Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.gross_revenue || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Selected scope current gross</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.current_gross_sales || 0, null, currency)}</p>
           </div>
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Full Team Revenue</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.gross_revenue || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Full team current gross</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.current_gross_sales || 0, null, currency)}</p>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <GrossNetRevenueCard
-          gross={metrics?.gross_revenue || 0}
-          net={metrics?.net_revenue || 0}
-          currency={currency}
-          loading={loadingMetrics}
-          delay={50}
-        />
-        <KpiCard title="Refunded Amount" value={loadingMetrics ? <Skeleton className="h-8 w-20 rounded-md" /> : formatOrderMoney(metrics?.refunded_amount || 0, null, currency)} icon={PoundSterling} info="Returns and adjustments: original minus current total per order." delay={150} />
-        <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
+      <div className="space-y-3">
+        <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
+        <div className="grid grid-cols-1 sm:max-w-xs">
+          <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
+        </div>
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
@@ -374,7 +387,9 @@ export default function ManagerDashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => formatOrderMoney(v, null, currency)} />
+                <Tooltip
+                  formatter={(v: number) => [formatOrderMoney(v, null, currency), "Current gross sales"]}
+                />
                 <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -399,8 +414,11 @@ export default function ManagerDashboardPage() {
                   <th className="text-left py-2.5 font-medium">Salesperson</th>
                   <th className="text-right py-2.5 font-medium">Registered Customers</th>
                   <th className="text-right py-2.5 font-medium">Orders</th>
-                  <th className="text-right py-2.5 font-medium">Gross</th>
-                  <th className="text-right py-2.5 font-medium">Net Revenue</th>
+                  <th className="text-right py-2.5 font-medium">Original gross</th>
+                  <th className="text-right py-2.5 font-medium">Current gross</th>
+                  <th className="text-right py-2.5 font-medium">Net ex VAT</th>
+                  <th className="text-right py-2.5 font-medium">VAT</th>
+                  <th className="text-right py-2.5 font-medium">Refunded / returned</th>
                 </tr>
               </thead>
               <tbody>
@@ -409,8 +427,11 @@ export default function ManagerDashboardPage() {
                     <td className="py-3">{row.salesperson_name}</td>
                     <td className="py-3 text-right">{row.customers_count}</td>
                     <td className="py-3 text-right">{row.orders_total_count}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(row.gross_revenue, null, currency)}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(row.net_revenue, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.original_gross_sales, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.current_gross_sales, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.net_sales_ex_vat, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.vat_collected, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(row.refunded_returned_value, null, currency)}</td>
                   </tr>
                 ))}
                 {filteredTeamRows.length > 1 && (
@@ -418,8 +439,11 @@ export default function ManagerDashboardPage() {
                     <td className="py-3">Total</td>
                     <td className="py-3 text-right">{breakdownTotals.customers_count}</td>
                     <td className="py-3 text-right">{breakdownTotals.orders_total_count}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.gross_revenue, null, currency)}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.net_revenue, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.original_gross_sales, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.current_gross_sales, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.net_sales_ex_vat, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.vat_collected, null, currency)}</td>
+                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.refunded_returned_value, null, currency)}</td>
                   </tr>
                 )}
               </tbody>

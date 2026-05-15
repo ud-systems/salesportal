@@ -1,4 +1,5 @@
-import { ShoppingCart, Users, TrendingUp, AlertCircle } from "lucide-react";
+import { ShoppingCart, Users, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { KpiCard } from "@/components/KpiCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -12,7 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { GrossNetRevenueCard } from "@/components/GrossNetRevenueCard";
+import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
@@ -94,9 +95,7 @@ export default function DashboardPage() {
 
   const { data: topCustomers = [], isLoading: loadingTopCustomers } = useTopCustomers(3, scopeKey);
 
-  const grossRevenue = isAll ? (allBreakdown?.gross_revenue ?? 0) : (rangeBreakdown?.gross_revenue ?? 0);
-  const netRevenue = isAll ? (allBreakdown?.net_revenue ?? 0) : (rangeBreakdown?.net_revenue ?? 0);
-  const refundedAmount = isAll ? (allBreakdown?.refunded_amount ?? 0) : (rangeBreakdown?.refunded_amount ?? 0);
+  const currentGross = isAll ? (allBreakdown?.current_gross_sales ?? 0) : (rangeBreakdown?.current_gross_sales ?? 0);
   const totalOrders = isAll ? (allBreakdown?.orders_total_count ?? 0) : (rangeBreakdown?.orders_total_count ?? 0);
   const totalCustomers = isAll ? (allBreakdown?.customers_count ?? 0) : (rangeBreakdown?.customers_count ?? 0);
   const recentOrders = isAll ? recentOrdersAll : recentFiltered;
@@ -117,9 +116,9 @@ export default function DashboardPage() {
 
   const loadingChart = loadingSeries;
 
-  const prevRevenue = metricsCompare?.gross_revenue ?? 0;
+  const prevCurrentGross = metricsCompare?.current_gross_sales ?? 0;
   const revDelta =
-    !isAll && prevRevenue > 0 ? (((grossRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1) : null;
+    !isAll && prevCurrentGross > 0 ? (((currentGross - prevCurrentGross) / prevCurrentGross) * 100).toFixed(1) : null;
 
   const firstName = user?.name?.split(" ")[0] || "there";
 
@@ -191,54 +190,34 @@ export default function DashboardPage() {
         {!isAll && (
           <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
             Compared to previous equivalent period
-            {revDelta != null ? ` · Revenue ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
+            {revDelta != null ? ` · Current gross sales ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
           </p>
         )}
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <GrossNetRevenueCard
-          gross={grossRevenue}
-          net={netRevenue}
-          currency={currency}
+      <div className="space-y-3">
+        <RetailFinancialKpiSection
+          metrics={isAll ? allBreakdown : rangeBreakdown}
           loading={loadingRevenueTotal}
-          delay={50}
-          info={
-            <>
-              <span className="font-medium text-foreground">Net</span> is current order totals after returns (Shopify currentTotal), aligned with Admin.
-              <span className="block mt-1">
-                <span className="font-medium text-foreground">Gross</span> is original totals before returns (totalPriceSet).
-              </span>
-            </>
-          }
+          currency={currency}
+          delayBase={50}
         />
-        <KpiCard
-          title="Orders"
-          value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
-          icon={ShoppingCart}
-          info="Count of all non-test orders in your scope and selected period."
-          delay={100}
-        />
-        <KpiCard
-          title="Registered Customers"
-          value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
-          icon={Users}
-          info="Registered customers in your scope, filtered by customer created date for the selected period."
-          delay={150}
-        />
-        <KpiCard
-          title="Refunded Amount"
-          value={
-            loadingRevenueTotal || loadingOrdersCount ? (
-              <Skeleton className="h-8 w-20 rounded-md" />
-            ) : (
-              formatOrderMoney(refundedAmount, null, currency)
-            )
-          }
-          icon={TrendingUp}
-          info="Returns and adjustments: original order total minus current total (same basis as Shopify)."
-          delay={200}
-        />
+        <div className="grid grid-cols-2 lg:grid-cols-2 gap-3 lg:gap-4">
+          <KpiCard
+            title="Orders"
+            value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
+            icon={ShoppingCart}
+            info="Count of all non-test orders in your scope and selected period."
+            delay={200}
+          />
+          <KpiCard
+            title="Registered Customers"
+            value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
+            icon={Users}
+            info="Registered customers in your scope, filtered by customer created date for the selected period."
+            delay={250}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">

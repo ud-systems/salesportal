@@ -122,6 +122,9 @@ export default defineConfig(({ mode }) => ({
       // Without this, `npm run dev` never looks “installable” and our in-app Install CTA stays inert.
       devOptions: {
         enabled: mode === "development",
+        // dev-dist often only has sw.js + workbox-*.js (ignored from precache), so the
+        // default glob matches nothing and workbox-build warns; this is the plugin-supported fix.
+        suppressWarnings: true,
       },
     }),
   ],

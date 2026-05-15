@@ -16,6 +16,7 @@ import {
   SP_ASSIGNED_METAFIELD_KEYS_ORDERED,
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
+import { mapShopifyOrderMoneyFields } from "../_shared/shopify-order-totals.ts";
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -534,6 +535,8 @@ Deno.serve(async (req) => {
               subtotalPriceSet { shopMoney { amount } }
               currentTotalTaxSet { shopMoney { amount } }
               totalPriceSet { shopMoney { amount currencyCode } }
+              originalTotalPriceSet { shopMoney { amount } }
+              currentTotalPriceSet { shopMoney { amount currencyCode } }
               customer { id displayName defaultEmailAddress { emailAddress } }
               lineItems(first: 100) {
                 edges {
@@ -610,6 +613,7 @@ Deno.serve(async (req) => {
         } else {
           updatedOrders++;
         }
+        const money = mapShopifyOrderMoneyFields(o);
         const row = {
           shopify_order_id: shopifyOrderId,
           order_number: o.name,
@@ -617,7 +621,9 @@ Deno.serve(async (req) => {
           shopify_customer_id: shopifyCustomerId,
           customer_name: custName,
           email: o.email || custEmail,
-          total: parseFloat(o.totalPriceSet?.shopMoney?.amount || "0"),
+          total: money.total,
+          original_total: money.original_total,
+          current_total: money.current_total,
           currency_code: o.currencyCode || o.totalPriceSet?.shopMoney?.currencyCode || null,
           subtotal: parseFloat(o.subtotalPriceSet?.shopMoney?.amount || "0") || null,
           total_tax: parseFloat(o.currentTotalTaxSet?.shopMoney?.amount || "0") || null,
