@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import type { AppCapability } from "@/lib/auth-capabilities";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { SidebarRefreshButton } from "@/components/SidebarRefreshButton";
 import { NotificationBell } from "@/components/NotificationBell";
 import {
   AlertDialog,
@@ -158,7 +159,8 @@ export function AppSidebar() {
         </div>
 
         <div className="p-3 border-t space-y-2">
-          <div className="px-3">
+          <div className="px-3 space-y-2">
+            <SidebarRefreshButton />
             <PwaInstallPrompt />
           </div>
           <div className="flex items-center gap-3 px-3 py-2">
