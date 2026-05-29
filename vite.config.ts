@@ -104,6 +104,7 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
+        importScripts: ["/push-sw-handler.js"],
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/sw\.js$/, /^\/workbox.*\.js$/],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],

@@ -563,6 +563,12 @@ export default function SettingsPage() {
               onCheckedChange={(v) => updateSetting("notify_low_stock", String(v))}
             />
           </div>
+          <div className="rounded-xl border bg-muted/30 px-4 py-3">
+            <p className="text-sm font-medium text-foreground">Sales alerts (in-app + push)</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              When Shopify webhooks are configured, assigned salespeople, their managers, and admins receive in-app alerts and live toasts. Users can enable device push on Profile.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

@@ -1,5 +1,4 @@
 import { Users, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
-import { KpiCard } from "@/components/KpiCard";
 import {
   useRecentOrders,
   useRecentOrdersInRange,
@@ -7,6 +6,7 @@ import {
   useUnfulfilledOrdersCountInRange,
   useSalespersonFinancialBreakdown,
   useScopeFinancialBreakdown,
+  useScopeShopifySalesBreakdown,
   useScopeOrderTimeseries,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -17,13 +17,14 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, trendTitleForPreset, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { useAuth } from "@/contexts/AuthContext";
 import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
-import { OrdersMetricsGroupCard } from "@/components/OrdersMetricsGroupCard";
+import { DashboardOverviewSummaryCard } from "@/components/DashboardOverviewSummaryCard";
 
 const TOP_SALES_BAR_COLORS = [
   "hsl(100 45% 42%)",
@@ -56,26 +57,7 @@ export default function AdminDashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
-  const trendTitle = useMemo(() => {
-    switch (preset) {
-      case "all":
-        return "All Time Revenue Trend";
-      case "today":
-        return "Today Revenue Trend";
-      case "week":
-        return "Last 7 Days Revenue Trend";
-      case "month":
-        return "This Month Revenue Trend";
-      case "quarter":
-        return "This Quarter Revenue Trend";
-      case "year":
-        return "This Year Revenue Trend";
-      case "custom":
-        return "Custom Range Revenue Trend";
-      default:
-        return "Revenue Trend";
-    }
-  }, [preset]);
+  const trendTitle = useMemo(() => trendTitleForPreset(preset, "revenue"), [preset]);
 
   const { user } = useAuth();
   const { data: allBreakdown, isLoading: loadingAllBreakdown } = useScopeFinancialBreakdown(user?.id, null, null, Boolean(user?.id));
@@ -90,6 +72,18 @@ export default function AdminDashboardPage() {
     cmpFromIso,
     cmpToIso,
     !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
+  );
+  const { data: allShopifySalesBreakdown, isLoading: loadingAllShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
+    user?.id,
+    null,
+    null,
+    Boolean(user?.id),
+  );
+  const { data: rangeShopifySalesBreakdown, isLoading: loadingRangeShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
+    user?.id,
+    fromIso,
+    toIso,
+    !isAll && Boolean(user?.id),
   );
   const { data: series = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
     user?.id,
@@ -126,6 +120,8 @@ export default function AdminDashboardPage() {
   const unfulfilledOrders = isAll ? unfulfilledOrdersAll : unfulfilledOrdersRange;
   const loadingUnfulfilled = isAll ? loadingUnfulfilledAll : loadingUnfulfilledRange;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
+  const loadingShopifySalesBreakdown = isAll ? loadingAllShopifySalesBreakdown : loadingRangeShopifySalesBreakdown;
+  const shopifySalesBreakdown = isAll ? allShopifySalesBreakdown : rangeShopifySalesBreakdown;
   const prevCurrentGross = compareBreakdown?.current_gross_sales ?? 0;
   const revDelta =
     !isAll && prevCurrentGross > 0 ? (((currentGross - prevCurrentGross) / prevCurrentGross) * 100).toFixed(1) : null;
@@ -262,13 +258,7 @@ export default function AdminDashboardPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">Last 7 days</SelectItem>
-              <SelectItem value="month">This month</SelectItem>
-              <SelectItem value="quarter">This quarter</SelectItem>
-              <SelectItem value="year">This year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
+              <PeriodSelectItems />
             </SelectContent>
           </Select>
         </div>
@@ -291,7 +281,7 @@ export default function AdminDashboardPage() {
         {!isAll && (
           <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
             vs previous equivalent period
-            {revDelta != null ? ` · Current gross sales ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
+            {revDelta != null ? ` · Total sales (orders) ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
           </p>
         )}
       </div>
@@ -358,29 +348,27 @@ export default function AdminDashboardPage() {
       )}
 
       <div className="space-y-3 lg:space-y-4">
+        <DashboardOverviewSummaryCard
+          currency={currency}
+          delayBase={40}
+          salesBreakdown={shopifySalesBreakdown}
+          loadingSales={loadingShopifySalesBreakdown}
+          totalOrders={totalOrders}
+          paidOrders={paidOrders}
+          refundedOrders={refundedOrders}
+          unfulfilledOrders={unfulfilledOrders}
+          loadingOrders={loadingOrdersCount}
+          loadingUnfulfilled={loadingUnfulfilled}
+          totalCustomers={totalCustomers}
+          loadingCustomers={loadingCustomersCount}
+        />
         <RetailFinancialKpiSection
           metrics={isAll ? allBreakdown : rangeBreakdown}
           loading={loadingRevenueTotal}
           currency={currency}
-          delayBase={40}
-        />
-        <div className="grid grid-cols-1 sm:max-w-sm">
-          <KpiCard
-            title="Registered Customers"
-            value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
-            icon={Users}
-            info="Scoped registered customers in the selected period (customer created-at filter)."
-            delay={120}
-          />
-        </div>
-        <OrdersMetricsGroupCard
-          total={totalOrders}
-          paid={paidOrders}
-          refundedOrders={refundedOrders}
-          unfulfilled={unfulfilledOrders}
-          loading={loadingOrdersCount}
-          loadingUnfulfilled={loadingUnfulfilled}
-          delay={120}
+          delayBase={80}
+          collapsible
+          defaultOpen={false}
         />
       </div>
 

@@ -70,3 +70,30 @@ export function formatCompactMoney(value: number, currencyCode: string): string 
     return formatMoneyAmount(value, code);
   }
 }
+
+export type OrderShippingFields = {
+  shipping_name?: string | null;
+  shipping_address1?: string | null;
+  shipping_address2?: string | null;
+  shipping_city?: string | null;
+  shipping_province?: string | null;
+  shipping_country?: string | null;
+  shipping_zip?: string | null;
+};
+
+export function formatOrderShippingAddress(order: OrderShippingFields | null | undefined): string {
+  if (!order) return "—";
+  const line = [
+    order.shipping_name,
+    order.shipping_address1,
+    order.shipping_address2,
+    order.shipping_city,
+    order.shipping_province,
+    order.shipping_zip,
+    order.shipping_country,
+  ]
+    .map((part) => (part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+  return line || "—";
+}

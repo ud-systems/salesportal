@@ -2,10 +2,11 @@ import { useCustomersPaginated, useOrdersPaginated, useSalespersonFinancialBreak
 import { Users, PoundSterling, FileDown, FileText } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDisplayDate, formatOrderMoney } from "@/lib/format";
+import { formatDisplayDate, formatOrderMoney, formatOrderShippingAddress } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getDashboardRange, toLocalYmd, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toLocalYmd, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -16,27 +17,6 @@ import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 
 const PDF_BRAND_PRIMARY_RGB: [number, number, number] = [93, 163, 67];
-
-function formatPresetLabel(preset: DatePreset): string {
-  switch (preset) {
-    case "all":
-      return "All Time";
-    case "today":
-      return "Today";
-    case "week":
-      return "Last 7 Days";
-    case "month":
-      return "This Month";
-    case "quarter":
-      return "This Quarter";
-    case "year":
-      return "This Year";
-    case "custom":
-      return "Custom Range";
-    default:
-      return "Period";
-  }
-}
 
 function initials(name: string) {
   return name
@@ -242,13 +222,7 @@ export default function SalespersonsPage() {
               <SelectValue placeholder="Period" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">Last 7 days</SelectItem>
-              <SelectItem value="month">This month</SelectItem>
-              <SelectItem value="quarter">This quarter</SelectItem>
-              <SelectItem value="year">This year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
+              <PeriodSelectItems />
             </SelectContent>
           </Select>
           {preset === "custom" && (
@@ -474,6 +448,7 @@ export default function SalespersonsPage() {
                         <p className="text-xs text-muted-foreground truncate">{order.customer_name || "Unknown customer"}</p>
                         <p className="text-xs text-muted-foreground whitespace-nowrap">{formatDisplayDate(order.shopify_created_at || order.created_at)}</p>
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{formatOrderShippingAddress(order)}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         <StatusBadge status={(order.financial_status || "pending") as any} />
                         <StatusBadge status={(order.fulfillment_status || "unfulfilled") as any} />

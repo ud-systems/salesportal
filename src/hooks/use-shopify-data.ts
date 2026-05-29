@@ -46,6 +46,48 @@ export type ScopeFinancialBreakdown = {
   orders_missing_current_total: number;
 };
 
+/** Layer 2: Shopify Analytics–style components from `reporting_*` columns (see get_scope_shopify_sales_breakdown). */
+export type ScopeShopifySalesBreakdown = {
+  gross_sales_line_list: number;
+  discounts: number;
+  returns_refunded: number;
+  net_sales_derived: number;
+  shipping: number;
+  taxes: number;
+  total_sales_check: number;
+  orders_in_scope: number;
+  /** Non-void orders where reporting_line_items_gross is still null (re-sync to backfill). */
+  orders_missing_reporting: number;
+};
+
+export function emptyScopeShopifySalesBreakdown(): ScopeShopifySalesBreakdown {
+  return {
+    gross_sales_line_list: 0,
+    discounts: 0,
+    returns_refunded: 0,
+    net_sales_derived: 0,
+    shipping: 0,
+    taxes: 0,
+    total_sales_check: 0,
+    orders_in_scope: 0,
+    orders_missing_reporting: 0,
+  };
+}
+
+function mapScopeShopifySalesBreakdownRow(row: Partial<ScopeShopifySalesBreakdown> | undefined | null): ScopeShopifySalesBreakdown {
+  return {
+    gross_sales_line_list: Number(row?.gross_sales_line_list ?? 0),
+    discounts: Number(row?.discounts ?? 0),
+    returns_refunded: Number(row?.returns_refunded ?? 0),
+    net_sales_derived: Number(row?.net_sales_derived ?? 0),
+    shipping: Number(row?.shipping ?? 0),
+    taxes: Number(row?.taxes ?? 0),
+    total_sales_check: Number(row?.total_sales_check ?? 0),
+    orders_in_scope: Number(row?.orders_in_scope ?? 0),
+    orders_missing_reporting: Number(row?.orders_missing_reporting ?? 0),
+  };
+}
+
 export type AnalyticsOverviewKpis = {
   active_buyers_count: number;
   registrations_count: number;
@@ -330,6 +372,100 @@ export function useScopeFinancialBreakdown(
     }),
     staleTime: 60_000,
     enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+export function useScopeShopifySalesBreakdown(
+  viewerUserId: string | undefined,
+  fromIso?: string | null,
+  toIso?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["scope-shopify-sales-breakdown", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
+    queryFn: async () =>
+      withQueryTiming("get_scope_shopify_sales_breakdown", { viewerUserId, fromIso: fromIso ?? null, toIso: toIso ?? null }, async () => {
+        if (!viewerUserId) {
+          return emptyScopeShopifySalesBreakdown();
+        }
+        const { data, error } = await supabase.rpc("get_scope_shopify_sales_breakdown", {
+          _viewer_user_id: viewerUserId,
+          _from_iso: fromIso ?? null,
+          _to_iso: toIso ?? null,
+        });
+        if (error) throw error;
+        return mapScopeShopifySalesBreakdownRow(data?.[0]);
+      }),
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+/** Layer 2 aggregated for customers tied to specific salesperson user IDs (manager/supervisor salesperson mode). */
+export function useSelectedSalespeopleShopifySalesBreakdown(
+  viewerUserId: string | undefined,
+  salespersonUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "selected-salespeople-shopify-sales-breakdown",
+      viewerUserId ?? "none",
+      fromIso ?? "none",
+      toIso ?? "none",
+      [...salespersonUserIds].sort().join(","),
+    ],
+    queryFn: async () =>
+      withQueryTiming(
+        "get_selected_salespeople_shopify_sales_breakdown",
+        { viewerUserId, salespersonCount: salespersonUserIds.length, fromIso: fromIso ?? null, toIso: toIso ?? null },
+        async () => {
+          if (!viewerUserId || !salespersonUserIds.length) return emptyScopeShopifySalesBreakdown();
+          const { data, error } = await supabase.rpc("get_selected_salespeople_shopify_sales_breakdown", {
+            _viewer_user_id: viewerUserId,
+            _salesperson_user_ids: salespersonUserIds,
+            _from_iso: fromIso ?? null,
+            _to_iso: toIso ?? null,
+          });
+          if (error) throw error;
+          return mapScopeShopifySalesBreakdownRow(data?.[0]);
+        },
+      ),
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId) && salespersonUserIds.length > 0,
+  });
+}
+
+/** Sum of per-viewer Layer 2 (matches get_scope_financial_breakdown_for_viewers aggregation). */
+export function useAggregateShopifySalesBreakdownForViewers(
+  viewerUserIds: string[],
+  fromIso: string | null | undefined,
+  toIso: string | null | undefined,
+  scopeKey = "global",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "aggregate-shopify-sales-breakdown-for-viewers",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+      [...viewerUserIds].sort().join(","),
+    ],
+    queryFn: async () => {
+      if (!viewerUserIds.length) return emptyScopeShopifySalesBreakdown();
+      const { data, error } = await supabase.rpc("get_scope_shopify_sales_breakdown_for_viewers", {
+        _viewer_user_ids: viewerUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      return mapScopeShopifySalesBreakdownRow(data?.[0]);
+    },
+    staleTime: 60_000,
+    enabled: enabled && viewerUserIds.length > 0,
   });
 }
 
@@ -2484,6 +2620,52 @@ export type TriggerSyncOptions = {
   reset_customer_checkpoint?: boolean;
   reset_orders_checkpoint?: boolean;
 };
+
+export type OrderFinancialRefreshOptions = {
+  /** Numeric Shopify order IDs or full `gid://shopify/Order/...` (max 40 per call). */
+  shopify_order_ids?: string[];
+  /** Also enqueue orders where status is refunded-like but current_total still equals total (RPC; max 40 total with explicit ids). */
+  auto_stale_refunded_totals_match?: boolean;
+};
+
+export async function triggerOrderFinancialRefresh(options: OrderFinancialRefreshOptions) {
+  await assertLicenseActive();
+  const accessToken = await getAccessTokenForEdgeFunctions();
+  if (!accessToken) {
+    throw new Error("Your session expired. Please sign in again.");
+  }
+  const body: Record<string, unknown> = {};
+  if (options.shopify_order_ids?.length) {
+    body.refresh_shopify_order_ids = options.shopify_order_ids.slice(0, 40);
+  }
+  if (options.auto_stale_refunded_totals_match) {
+    body.refresh_auto_stale_financial = true;
+  }
+  if (!body.refresh_shopify_order_ids && !body.refresh_auto_stale_financial) {
+    throw new Error("Provide shopify_order_ids and/or enable auto_stale_refunded_totals_match.");
+  }
+  try {
+    const { data, error } = await supabase.functions.invoke("shopify-sync", {
+      body,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      timeout: 180_000,
+    });
+    if (error) {
+      throw new Error(`Order refresh failed: ${error.message}`);
+    }
+    return data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown order refresh error";
+    if (/Failed to fetch|Load failed|NetworkError/i.test(msg)) {
+      throw new Error(
+        "Order refresh was interrupted (network or gateway timeout). Deploy shopify-sync with order_financial_refresh support and try again.",
+      );
+    }
+    throw err;
+  }
+}
 
 async function assertLicenseActive() {
   const { data, error } = await supabase

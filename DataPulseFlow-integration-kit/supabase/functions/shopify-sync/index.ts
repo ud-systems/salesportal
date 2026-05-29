@@ -17,6 +17,8 @@ import {
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
 import { mapShopifyOrderMoneyFields } from "../_shared/shopify-order-totals.ts";
+import { SHOPIFY_ORDER_DETAIL_GQL, upsertShopifyOrderFromGraphqlNode } from "../_shared/shopify-order-graphql-upsert.ts";
+import { extractOrderReportingFields } from "../_shared/shopify-order-reporting.ts";
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -220,6 +222,88 @@ Deno.serve(async (req) => {
     const msg = err instanceof Error ? err.message : String(err || "");
     return /Invalid cursor for current pagination sort/i.test(msg);
   };
+
+  const refreshIdsRaw = requestBody?.refresh_shopify_order_ids;
+  const refreshIdsList = Array.isArray(refreshIdsRaw)
+    ? refreshIdsRaw.map((x: unknown) => String(x).trim()).filter((s) => s.length > 0)
+    : [];
+  const dedupRefreshIds = [...new Set(refreshIdsList)];
+  const autoStaleFinancial = requestBody?.refresh_auto_stale_financial === true;
+
+  if (dedupRefreshIds.length > 0 || autoStaleFinancial) {
+    const MAX_REFRESH = 40;
+    const merged: string[] = [];
+    for (const id of dedupRefreshIds) {
+      if (merged.length >= MAX_REFRESH) break;
+      merged.push(id);
+    }
+    if (autoStaleFinancial && merged.length < MAX_REFRESH) {
+      const { data: staleRows, error: staleErr } = await supabase.rpc("get_shopify_order_ids_stale_refunded_totals", {
+        _limit: MAX_REFRESH - merged.length,
+      });
+      if (staleErr) console.error("get_shopify_order_ids_stale_refunded_totals:", staleErr.message);
+      for (const row of staleRows || []) {
+        const sid = (row as { shopify_order_id?: string }).shopify_order_id;
+        if (!sid || merged.includes(sid)) continue;
+        merged.push(sid);
+        if (merged.length >= MAX_REFRESH) break;
+      }
+    }
+
+    const toOrderGid = (raw: string) => {
+      const s = String(raw).trim();
+      if (s.startsWith("gid://shopify/Order/")) return s;
+      const digits = s.replace(/\D/g, "");
+      if (digits.length > 0) return `gid://shopify/Order/${digits}`;
+      return `gid://shopify/Order/${s.replace(/^#/, "")}`;
+    };
+
+    const resolveLookupOnly = async (customerGid: string | null) => {
+      if (!customerGid) return null;
+      const shopifyCustomerNumeric = customerGid.replace("gid://shopify/Customer/", "");
+      const { data: customerRow } = await supabase
+        .from("shopify_customers")
+        .select("id")
+        .eq("shopify_customer_id", shopifyCustomerNumeric)
+        .maybeSingle();
+      return customerRow?.id || null;
+    };
+
+    const refreshResults: { shopify_order_id: string; ok: boolean; order_id?: string; error?: string }[] = [];
+    for (const rawId of merged.slice(0, MAX_REFRESH)) {
+      const gid = toOrderGid(rawId);
+      try {
+        const json = await shopifyQuery(SHOPIFY_ORDER_DETAIL_GQL, { id: gid });
+        const hit = await upsertShopifyOrderFromGraphqlNode(
+          supabase,
+          json.data?.order as Record<string, unknown> | undefined,
+          resolveLookupOnly,
+        );
+        if (!hit) {
+          refreshResults.push({ shopify_order_id: rawId, ok: false, error: "Order not found in Shopify or empty response" });
+        } else {
+          refreshResults.push({ shopify_order_id: hit.shopify_order_id, ok: true, order_id: hit.orderId });
+        }
+      } catch (e) {
+        refreshResults.push({
+          shopify_order_id: rawId,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        mode: "order_financial_refresh",
+        refreshed: refreshResults.filter((r) => r.ok).length,
+        failed: refreshResults.filter((r) => !r.ok).length,
+        results: refreshResults,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
 
   /** Shopify lists use sortKey UPDATED_AT reverse:true → newest changes first. Per page/batch we upsert new rows before updates where applicable. */
   const SYNC_POLICY_NOTE =
@@ -532,11 +616,15 @@ Deno.serve(async (req) => {
               processedAt
               displayFinancialStatus
               displayFulfillmentStatus
+              taxesIncluded
               subtotalPriceSet { shopMoney { amount } }
               currentTotalTaxSet { shopMoney { amount } }
               totalPriceSet { shopMoney { amount currencyCode } }
               originalTotalPriceSet { shopMoney { amount } }
               currentTotalPriceSet { shopMoney { amount currencyCode } }
+              currentTotalDiscountsSet { shopMoney { amount } }
+              currentShippingPriceSet { shopMoney { amount } }
+              totalRefundedSet { shopMoney { amount } }
               customer { id displayName defaultEmailAddress { emailAddress } }
               lineItems(first: 100) {
                 edges {
@@ -614,6 +702,7 @@ Deno.serve(async (req) => {
           updatedOrders++;
         }
         const money = mapShopifyOrderMoneyFields(o);
+        const rep = extractOrderReportingFields(o as Record<string, unknown>);
         const row = {
           shopify_order_id: shopifyOrderId,
           order_number: o.name,
@@ -634,6 +723,12 @@ Deno.serve(async (req) => {
           order_note: o.note || null,
           tags: orderTags || null,
           test_order: Boolean(o.test),
+          updated_at: new Date().toISOString(),
+          reporting_line_items_gross: rep.reporting_line_items_gross,
+          reporting_total_discounts: rep.reporting_total_discounts,
+          reporting_total_shipping: rep.reporting_total_shipping,
+          reporting_total_refunded: rep.reporting_total_refunded,
+          taxes_included: rep.taxes_included,
         };
         if (isNewOrder) newOrdersPayload.push(row);
         else updateOrdersPayload.push(row);

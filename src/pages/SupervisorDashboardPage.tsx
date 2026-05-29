@@ -2,13 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { ShoppingCart } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
+import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useAggregateFinancialBreakdownForViewers,
+  useAggregateShopifySalesBreakdownForViewers,
   useDirectReportSalesPerformance,
+  emptyScopeShopifySalesBreakdown,
   useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
+  useScopeShopifySalesBreakdown,
+  useSelectedSalespeopleShopifySalesBreakdown,
   useSupervisorSelectedManagerTimeseries,
   useSupervisorManagerScopePerformance,
   useSupervisorSalespersonOptions,
@@ -18,7 +23,8 @@ import {
 } from "@/hooks/use-shopify-data";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { formatOrderMoney } from "@/lib/format";
-import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, trendTitleForPreset, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { differenceInCalendarDays } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
@@ -90,24 +96,7 @@ export default function SupervisorDashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
-  const trendTitle = useMemo(() => {
-    switch (preset) {
-      case "today":
-        return "Today Trend";
-      case "week":
-        return "Last 7 Days Trend";
-      case "month":
-        return "This Month Trend";
-      case "quarter":
-        return "This Quarter Trend";
-      case "year":
-        return "This Year Trend";
-      case "custom":
-        return "Custom Range Trend";
-      default:
-        return "Trend";
-    }
-  }, [preset]);
+  const trendTitle = useMemo(() => trendTitleForPreset(preset), [preset]);
 
   const { data: managerRows = [], isLoading: loadingManagers } = useSupervisorManagerScopePerformance(
     user?.id,
@@ -262,6 +251,65 @@ export default function SupervisorDashboardPage() {
           : scopeMode === "salesperson"
             ? loadingSalespersonScopedData
             : loadingSelectedSeries;
+
+  const { data: shopifyLayer2All, isLoading: loadingShopifyLayer2All } = useScopeShopifySalesBreakdown(
+    user?.id,
+    fromIso,
+    toIso,
+    Boolean(user?.id) && scopeMode === "all",
+  );
+  const { data: shopifyLayer2Aggregate, isLoading: loadingShopifyLayer2Aggregate } =
+    useAggregateShopifySalesBreakdownForViewers(
+      selectedViewerIds,
+      fromIso,
+      toIso,
+      scopeKey,
+      Boolean(user?.id) &&
+        (scopeMode === "mine" || scopeMode === "manager_team") &&
+        !isSalespersonDrilldown &&
+        selectedViewerIds.length > 0,
+    );
+  const { data: shopifyLayer2Salespeople, isLoading: loadingShopifyLayer2Salespeople } =
+    useSelectedSalespeopleShopifySalesBreakdown(
+      user?.id,
+      selectedSalespersonIds,
+      fromIso,
+      toIso,
+      Boolean(user?.id) &&
+        scopeMode === "salesperson" &&
+        !isSalespersonDrilldown &&
+        selectedSalespersonIds.length > 0,
+    );
+  const { data: shopifyLayer2Drill, isLoading: loadingShopifyLayer2Drill } = useScopeShopifySalesBreakdown(
+    drilledSalespersonId,
+    fromIso,
+    toIso,
+    Boolean(user?.id && drilledSalespersonId) && isSalespersonDrilldown,
+  );
+
+  const shopifySalesBreakdown = useMemo(() => {
+    if (scopeMode === "all") return shopifyLayer2All ?? emptyScopeShopifySalesBreakdown();
+    if (isSalespersonDrilldown) return shopifyLayer2Drill ?? emptyScopeShopifySalesBreakdown();
+    if (scopeMode === "salesperson") return shopifyLayer2Salespeople ?? emptyScopeShopifySalesBreakdown();
+    return shopifyLayer2Aggregate ?? emptyScopeShopifySalesBreakdown();
+  }, [
+    scopeMode,
+    isSalespersonDrilldown,
+    shopifyLayer2All,
+    shopifyLayer2Drill,
+    shopifyLayer2Salespeople,
+    shopifyLayer2Aggregate,
+  ]);
+
+  const loadingShopifySalesBreakdown =
+    scopeMode === "all"
+      ? loadingShopifyLayer2All
+      : isSalespersonDrilldown
+        ? loadingShopifyLayer2Drill
+        : scopeMode === "salesperson"
+          ? loadingShopifyLayer2Salespeople
+          : loadingShopifyLayer2Aggregate;
+
   const quickScopedIds = useMemo(() => {
     if (quickManagerFilter === "all") return null;
     const ranked = [...typedRows].sort((a, b) => Number(b.team_revenue || 0) - Number(a.team_revenue || 0));
@@ -285,6 +333,7 @@ export default function SupervisorDashboardPage() {
     if (selectedSalespersonId === "all") return selectedManagerTeamRows;
     return selectedManagerTeamRows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
   }, [selectedManagerTeamRows, selectedSalespersonId]);
+
   useEffect(() => {
     if (selectedSalespersonId === "all") return;
     if (filteredSalespersonOptions.some((s) => s.user_id === selectedSalespersonId)) return;
@@ -307,12 +356,7 @@ export default function SupervisorDashboardPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="week">Last 7 days</SelectItem>
-                <SelectItem value="month">This month</SelectItem>
-                <SelectItem value="quarter">This quarter</SelectItem>
-                <SelectItem value="year">This year</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
+                <PeriodSelectItems includeAll={false} />
               </SelectContent>
             </Select>
           </div>
@@ -413,6 +457,12 @@ export default function SupervisorDashboardPage() {
 
       <div className="space-y-3">
         <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
+        <ShopifySalesBreakdownSection
+          breakdown={shopifySalesBreakdown}
+          loading={loadingShopifySalesBreakdown}
+          currency={currency}
+          delayBase={110}
+        />
         <div className="grid grid-cols-1 sm:max-w-xs">
           <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
         </div>

@@ -28,6 +28,7 @@ export function useUnreadNotifications(limit = 30) {
       return (data ?? []) as UserNotificationRow[];
     },
     staleTime: 15_000,
+    refetchInterval: 60_000,
   });
 }
 

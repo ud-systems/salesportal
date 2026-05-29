@@ -19,9 +19,10 @@ import { Pagination, PaginationContent, PaginationItem, PaginationLink, Paginati
 import { Skeleton } from "@/components/ui/skeleton";
 import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { useSearchParams } from "react-router-dom";
-import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
+import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney, formatOrderShippingAddress } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { getDashboardRange, toLocalYmd, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -321,13 +322,7 @@ export default function OrdersPage() {
             <SelectValue placeholder="Period" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">Last 7 days</SelectItem>
-            <SelectItem value="month">This month</SelectItem>
-            <SelectItem value="quarter">This quarter</SelectItem>
-            <SelectItem value="year">This year</SelectItem>
-            <SelectItem value="custom">Custom</SelectItem>
+            <PeriodSelectItems />
           </SelectContent>
         </Select>
         {preset === "custom" && (
@@ -374,7 +369,7 @@ export default function OrdersPage() {
         <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
       </div>
       {isLeader && (
-        <div className={`grid grid-cols-1 gap-2 ${isSupervisor ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
+        <div className={`hidden lg:grid grid-cols-1 gap-2 ${isSupervisor ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
           <Select
             value={scopeMode}
             onValueChange={(value: "all" | "mine" | "manager_team") => {
@@ -421,19 +416,59 @@ export default function OrdersPage() {
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Orders" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
         <div className="space-y-3">
+          {isLeader && (
+            <>
+              <p className="text-sm font-medium font-body text-foreground">Scope</p>
+              <Select
+                value={scopeMode}
+                onValueChange={(value: "all" | "mine" | "manager_team") => {
+                  setScopeMode(value);
+                  setSelectedManagerId("all");
+                  setSelectedSalespersonId("all");
+                }}
+              >
+                <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                  <SelectValue placeholder="Scope" />
+                </SelectTrigger>
+                <SelectContent>
+                  {!isSupervisor && <SelectItem value="all">My Team</SelectItem>}
+                  <SelectItem value="mine">Mine</SelectItem>
+                  <SelectItem value="manager_team">{isSupervisor ? "Manager Team" : "Salesperson"}</SelectItem>
+                </SelectContent>
+              </Select>
+              {isSupervisor && (
+                <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
+                  <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                    <SelectValue placeholder="Manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Select manager</SelectItem>
+                    {managerOptions.map((m) => (
+                      <SelectItem key={m.user_id} value={m.user_id}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={selectedSalespersonId} onValueChange={setSelectedSalespersonId} disabled={scopeMode !== "manager_team"}>
+                <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                  <SelectValue placeholder="Salesperson" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All salespeople</SelectItem>
+                  {filteredSalespersonOptions.map((sp) => (
+                    <SelectItem key={sp.user_id} value={sp.user_id}>{sp.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
           <p className="text-sm font-medium font-body text-foreground">Period</p>
           <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
             <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
               <SelectValue placeholder="Period" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">Last 7 days</SelectItem>
-              <SelectItem value="month">This month</SelectItem>
-              <SelectItem value="quarter">This quarter</SelectItem>
-              <SelectItem value="year">This year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
+              <PeriodSelectItems />
             </SelectContent>
           </Select>
           {preset === "custom" && (
@@ -504,12 +539,13 @@ export default function OrdersPage() {
           <div className="relative hidden md:block card-float p-5 opacity-0 animate-fade-in" style={{ animationDelay: "100ms" }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-body">
-                <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Order #</th><th className="text-left py-2.5 font-medium">Customer</th><th className="text-right py-2.5 font-medium">Amount</th><th className="text-left py-2.5 font-medium">Payment</th><th className="text-left py-2.5 font-medium">Fulfillment</th><th className="text-left py-2.5 font-medium">Date</th></tr></thead>
+                <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Order #</th><th className="text-left py-2.5 font-medium">Customer</th><th className="text-left py-2.5 font-medium">Delivery</th><th className="text-right py-2.5 font-medium">Amount</th><th className="text-left py-2.5 font-medium">Payment</th><th className="text-left py-2.5 font-medium">Fulfillment</th><th className="text-left py-2.5 font-medium">Date</th></tr></thead>
                 <tbody>
                   {ordersVisible.map((o) => (
                     <tr key={o.id} onClick={() => setSelectedOrder(o)} className="border-b last:border-0 hover:bg-muted/50 transition-colors cursor-pointer">
                       <td className="py-3 font-medium text-foreground">{o.order_number || o.shopify_order_id}</td>
                       <td className="py-3 text-muted-foreground">{o.customer_name}</td>
+                      <td className="py-3 text-muted-foreground max-w-[200px] truncate" title={formatOrderShippingAddress(o)}>{formatOrderShippingAddress(o)}</td>
                       <td className="py-3 text-right font-medium text-foreground">
                         {formatOrderMoney(orderDisplayTotal(o), o.currency_code, storeCurrency)}
                       </td>
@@ -533,7 +569,7 @@ export default function OrdersPage() {
                 style={{ animationDelay: `${100 + i * 50}ms` }}
               >
                 <div className="flex items-start justify-between mb-2">
-                  <div><p className="font-medium text-foreground text-sm">{o.order_number || o.shopify_order_id}</p><p className="text-xs text-muted-foreground mt-0.5">{o.customer_name}</p></div>
+                  <div className="min-w-0 flex-1 pr-2"><p className="font-medium text-foreground text-sm">{o.order_number || o.shopify_order_id}</p><p className="text-xs text-muted-foreground mt-0.5">{o.customer_name}</p><p className="text-xs text-muted-foreground mt-1 line-clamp-2">{formatOrderShippingAddress(o)}</p></div>
                   <p className="font-heading font-bold text-foreground">
                     {formatOrderMoney(orderDisplayTotal(o), o.currency_code, storeCurrency)}
                   </p>
@@ -590,6 +626,7 @@ export default function OrdersPage() {
               <div className="rounded-xl border bg-card p-4">
                 <p className="text-lg font-semibold text-foreground">{selectedOrder.order_number || selectedOrder.shopify_order_id}</p>
                 <p className="text-muted-foreground">{selectedOrder.customer_name || "Unknown customer"} · {selectedOrder.email || "No email"}</p>
+                <p className="text-muted-foreground text-xs mt-2"><span className="font-medium text-foreground">Delivery:</span> {formatOrderShippingAddress(selectedOrder)}</p>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-xl border p-3"><p className="text-xs text-muted-foreground">Total</p><p className="font-semibold">{formatOrderMoney(orderDisplayTotal(selectedOrder), selectedOrder.currency_code, storeCurrency)}</p></div>

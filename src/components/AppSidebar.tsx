@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import type { AppCapability } from "@/lib/auth-capabilities";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { NotificationBell } from "@/components/NotificationBell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,8 +105,8 @@ export function AppSidebar() {
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex items-center justify-between p-5 pb-2">
-          <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between gap-2 p-5 pb-2">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="h-9 w-9 rounded-xl gradient-primary flex items-center justify-center">
               <img src="/white logo.png" alt="Logo" className="h-5 w-5 object-contain" />
             </div>
@@ -114,13 +115,16 @@ export function AppSidebar() {
               <p className="text-[11px] text-muted-foreground font-body">Sales Portal</p>
             </div>
           </div>
-          <button
-            onClick={() => setMobileOpen(false)}
-            className="lg:hidden tap-scale p-1 rounded-lg hover:bg-muted"
-            aria-label="Close menu"
-          >
-            <X className="h-4 w-4 text-muted-foreground" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <NotificationBell className="hidden lg:inline-flex" />
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="lg:hidden tap-scale p-1 rounded-lg hover:bg-muted"
+              aria-label="Close menu"
+            >
+              <X className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </div>
         </div>
 
         <div className="relative flex-1">

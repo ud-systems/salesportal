@@ -10,6 +10,8 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+import { PushNotificationsCard } from "@/components/PushNotificationsCard";
+
 export default function ProfilePage() {
   const { user, logout, isAdmin, refreshSessionUser } = useAuth();
   const queryClient = useQueryClient();
@@ -139,6 +141,8 @@ export default function ProfilePage() {
           </Button>
         </div>
       </div>
+
+      <PushNotificationsCard />
 
       <div className="card-float p-6 space-y-3 opacity-0 animate-fade-in" style={{ animationDelay: "150ms" }}>
         <div>

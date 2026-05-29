@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { getDashboardRange, toLocalYmd, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -35,6 +36,7 @@ import { useNavigate } from "react-router-dom";
 export default function CustomersPage() {
   const { data: storeCurrency = "GBP" } = useShopDisplayCurrency();
   const { user, isAdmin, isSupervisor, isManager } = useAuth();
+  const isLeader = isSupervisor || isManager;
   const navigate = useNavigate();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -50,7 +52,7 @@ export default function CustomersPage() {
   const [toDate, setToDate] = useState("");
   const [preset, setPreset] = useState<DatePreset>("all");
   const [quickRankFilter, setQuickRankFilter] = useState<"all" | "top3" | "bottom3">("all");
-  const [scopeMode, setScopeMode] = useState<"mine" | "manager_team">("mine");
+  const [scopeMode, setScopeMode] = useState<"all" | "mine" | "manager_team">("mine");
   const [selectedManagerId, setSelectedManagerId] = useState("all");
   const [selectedSalespersonId, setSelectedSalespersonId] = useState("all");
   const [sortBy, setSortBy] = useState<"total_revenue" | "total_orders" | "shopify_created_at" | "name">("total_revenue");
@@ -78,54 +80,90 @@ export default function CustomersPage() {
     isSupervisor && scopeMode === "manager_team" && selectedManagerId === "all",
   );
   const filteredSalespersonOptions = useMemo(
-    () =>
-      selectedManagerId === "all"
-        ? salespersonOptions
-        : salespersonOptions.filter((sp) => managerSalespeople.includes(sp.user_id)),
-    [selectedManagerId, salespersonOptions, managerSalespeople],
+    () => {
+      if (isSupervisor) {
+        return selectedManagerId === "all"
+          ? salespersonOptions
+          : salespersonOptions.filter((sp) => managerSalespeople.includes(sp.user_id));
+      }
+      if (isManager) return managerTeamOptions;
+      return [];
+    },
+    [isSupervisor, isManager, selectedManagerId, salespersonOptions, managerSalespeople, managerTeamOptions],
   );
   const managerLabelById = useMemo(
     () => new Map(managerOptions.map((m) => [m.user_id, m.label] as const)),
     [managerOptions],
   );
   const scopedSalespersonIds = useMemo(() => {
-    if (!isSupervisor) return [] as string[];
-    if (scopeMode === "mine") return user?.id ? [user.id] : [];
-    if (scopeMode === "manager_team" && selectedSalespersonId !== "all") return [selectedSalespersonId];
-    if (scopeMode === "manager_team" && selectedManagerId !== "all") {
-      return Array.from(new Set([selectedManagerId, ...managerSalespeople]));
+    if (isSupervisor) {
+      if (scopeMode === "mine") return user?.id ? [user.id] : [];
+      if (scopeMode === "manager_team" && selectedSalespersonId !== "all") return [selectedSalespersonId];
+      if (scopeMode === "manager_team" && selectedManagerId !== "all") {
+        return Array.from(new Set([selectedManagerId, ...managerSalespeople]));
+      }
+      if (scopeMode === "manager_team") {
+        return Array.from(new Set([...allManagerIds, ...allManagedSalespeople]));
+      }
+      return [];
     }
-    if (scopeMode === "manager_team") {
-      return Array.from(new Set([...allManagerIds, ...allManagedSalespeople]));
+    if (isManager) {
+      const teamIds = Array.from(new Set([user?.id, ...managerTeamOptions.map((sp) => sp.user_id)].filter(Boolean) as string[]));
+      if (scopeMode === "all") return teamIds;
+      if (scopeMode === "mine") return user?.id ? [user.id] : [];
+      if (scopeMode === "manager_team" && selectedSalespersonId !== "all") return [selectedSalespersonId];
+      if (scopeMode === "manager_team") return teamIds;
     }
-    return [];
+    return [] as string[];
   }, [
     isSupervisor,
+    isManager,
     scopeMode,
     managerSalespeople,
     allManagedSalespeople,
     allManagerIds,
+    managerTeamOptions,
     selectedManagerId,
     selectedSalespersonId,
     user?.id,
   ]);
   const scopedOwnerNames = useMemo(() => {
-    if (!isSupervisor) return [] as string[];
-    if (scopeMode === "mine") return user?.salesperson_name ? [user.salesperson_name] : [];
-    if (scopeMode === "manager_team" && selectedManagerId !== "all") {
-      const managerLabel = managerLabelById.get(selectedManagerId);
+    if (isSupervisor) {
+      if (scopeMode === "mine") return user?.salesperson_name ? [user.salesperson_name] : [];
+      if (scopeMode === "manager_team" && selectedManagerId !== "all") {
+        const managerLabel = managerLabelById.get(selectedManagerId);
+        if (selectedSalespersonId !== "all") {
+          const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+          return Array.from(new Set([selected?.label, managerLabel].filter(Boolean) as string[]));
+        }
+        return Array.from(new Set([managerLabel, ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean) as string[]));
+      }
       if (selectedSalespersonId !== "all") {
         const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
-        return Array.from(new Set([selected?.label, managerLabel].filter(Boolean) as string[]));
+        return selected?.label ? [selected.label] : [];
       }
-      return Array.from(new Set([managerLabel, ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean) as string[]));
+      return Array.from(new Set([...managerOptions.map((m) => m.label), ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean)));
     }
-    if (selectedSalespersonId !== "all") {
-      const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
-      return selected?.label ? [selected.label] : [];
+    if (isManager) {
+      if (scopeMode === "mine") return user?.salesperson_name ? [user.salesperson_name] : [];
+      if (selectedSalespersonId !== "all") {
+        const selected = filteredSalespersonOptions.find((sp) => sp.user_id === selectedSalespersonId);
+        return selected?.label ? [selected.label] : [];
+      }
+      return Array.from(new Set([user?.salesperson_name, ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean) as string[]));
     }
-    return Array.from(new Set([...managerOptions.map((m) => m.label), ...filteredSalespersonOptions.map((sp) => sp.label)].filter(Boolean)));
-  }, [isSupervisor, scopeMode, user?.salesperson_name, selectedSalespersonId, selectedManagerId, filteredSalespersonOptions, managerLabelById, managerOptions]);
+    return [] as string[];
+  }, [
+    isSupervisor,
+    isManager,
+    scopeMode,
+    user?.salesperson_name,
+    selectedSalespersonId,
+    selectedManagerId,
+    filteredSalespersonOptions,
+    managerLabelById,
+    managerOptions,
+  ]);
   const shouldApplyExplicitScopeFilters = useMemo(() => {
     if (isSupervisor) {
       if (scopeMode === "mine") return true;
@@ -134,24 +172,20 @@ export default function CustomersPage() {
       }
       return false;
     }
+    if (isManager) return true;
     if (!isAdmin) return true;
     return false;
-  }, [isSupervisor, isAdmin, scopeMode, selectedManagerId, selectedSalespersonId]);
-  const managerScopeSalespersonIds = useMemo(
-    () => Array.from(new Set([user?.id, ...managerTeamOptions.map((sp) => sp.user_id)].filter(Boolean) as string[])),
-    [managerTeamOptions, user?.id],
-  );
+  }, [isSupervisor, isManager, isAdmin, scopeMode, selectedManagerId, selectedSalespersonId]);
   const finalScopedSalespersonIds = useMemo(() => {
-    if (isSupervisor) return scopedSalespersonIds;
-    if (isManager) return managerScopeSalespersonIds;
+    if (isLeader) return scopedSalespersonIds;
     if (!isAdmin) return user?.id ? [user.id] : [];
     return [];
-  }, [isSupervisor, isManager, isAdmin, scopedSalespersonIds, managerScopeSalespersonIds, user?.id]);
+  }, [isLeader, isAdmin, scopedSalespersonIds, user?.id]);
   const finalScopedOwnerNames = useMemo(() => {
-    if (isSupervisor) return scopedOwnerNames;
+    if (isLeader) return scopedOwnerNames;
     if (!isAdmin && user?.salesperson_name) return [user.salesperson_name];
     return [];
-  }, [isSupervisor, isAdmin, scopedOwnerNames, user?.salesperson_name]);
+  }, [isLeader, isAdmin, scopedOwnerNames, user?.salesperson_name]);
   const isScopeCustomersReady = true;
 
   useEffect(() => {
@@ -171,7 +205,7 @@ export default function CustomersPage() {
       sortBy: "total_revenue" as "total_revenue" | "total_orders" | "shopify_created_at" | "name",
       sortDir: "desc" as "asc" | "desc",
       quickRankFilter: "all" as "all" | "top3" | "bottom3",
-      scopeMode: "mine" as "mine" | "manager_team",
+      scopeMode: "mine" as "all" | "mine" | "manager_team",
       selectedManagerId: "all",
       selectedSalespersonId: "all",
     });
@@ -186,7 +220,11 @@ export default function CustomersPage() {
     setSortBy(saved.sortBy);
     setSortDir(saved.sortDir);
     setQuickRankFilter(saved.quickRankFilter);
-    setScopeMode(saved.scopeMode === "manager_team" ? "manager_team" : "mine");
+    const normalizedScopeMode =
+      saved.scopeMode === "all" || saved.scopeMode === "mine" || saved.scopeMode === "manager_team"
+        ? saved.scopeMode
+        : "mine";
+    setScopeMode(isSupervisor && normalizedScopeMode === "all" ? "mine" : normalizedScopeMode);
     setSelectedManagerId(saved.selectedManagerId);
     setSelectedSalespersonId(saved.selectedSalespersonId);
   }, [user?.id]);
@@ -254,7 +292,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, cityFilter, assignmentFilter, rfmGroupFilter, pageSize, fromDate, toDate, sortBy, sortDir]);
+  }, [search, cityFilter, assignmentFilter, rfmGroupFilter, pageSize, fromDate, toDate, sortBy, sortDir, scopeMode, selectedManagerId, selectedSalespersonId]);
 
   const rfmGroups = useMemo(
     () => [
@@ -327,13 +365,7 @@ export default function CustomersPage() {
             <SelectValue placeholder="Period" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">Last 7 days</SelectItem>
-            <SelectItem value="month">This month</SelectItem>
-            <SelectItem value="quarter">This quarter</SelectItem>
-            <SelectItem value="year">This year</SelectItem>
-            <SelectItem value="custom">Custom</SelectItem>
+            <PeriodSelectItems />
           </SelectContent>
         </Select>
         {preset === "custom" && (
@@ -420,11 +452,11 @@ export default function CustomersPage() {
         <button onClick={() => setQuickRankFilter("top3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "top3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Top 3</button>
         <button onClick={() => setQuickRankFilter("bottom3")} className={`px-3 py-1.5 rounded-full text-xs font-medium font-body whitespace-nowrap transition-colors tap-scale ${quickRankFilter === "bottom3" ? "bg-primary text-primary-foreground" : "bg-card border text-muted-foreground hover:bg-muted"}`}>Bottom 3</button>
       </div>
-      {isSupervisor && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+      {isLeader && (
+        <div className={`hidden lg:grid grid-cols-1 gap-2 ${isSupervisor ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
           <Select
             value={scopeMode}
-            onValueChange={(value: "mine" | "manager_team") => {
+            onValueChange={(value: "all" | "mine" | "manager_team") => {
               setScopeMode(value);
               setSelectedManagerId("all");
               setSelectedSalespersonId("all");
@@ -434,21 +466,24 @@ export default function CustomersPage() {
               <SelectValue placeholder="Scope" />
             </SelectTrigger>
             <SelectContent>
+              {!isSupervisor && <SelectItem value="all">My Team</SelectItem>}
               <SelectItem value="mine">Mine</SelectItem>
-              <SelectItem value="manager_team">Manager Team</SelectItem>
+              <SelectItem value="manager_team">{isSupervisor ? "Manager Team" : "Salesperson"}</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
-            <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
-              <SelectValue placeholder="Manager" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Select manager</SelectItem>
-              {managerOptions.map((m) => (
-                <SelectItem key={m.user_id} value={m.user_id}>{m.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {isSupervisor && (
+            <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
+              <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                <SelectValue placeholder="Manager" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Select manager</SelectItem>
+                {managerOptions.map((m) => (
+                  <SelectItem key={m.user_id} value={m.user_id}>{m.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Select value={selectedSalespersonId} onValueChange={setSelectedSalespersonId} disabled={scopeMode !== "manager_team"}>
             <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
               <SelectValue placeholder="Salesperson" />
@@ -465,19 +500,59 @@ export default function CustomersPage() {
 
       <BottomSheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter Customers" footer={<Button className="w-full rounded-xl h-11 font-body tap-scale" onClick={() => setFilterOpen(false)}>Apply Filters</Button>}>
         <div className="space-y-3">
+          {isLeader && (
+            <>
+              <p className="text-sm font-medium font-body text-foreground">Scope</p>
+              <Select
+                value={scopeMode}
+                onValueChange={(value: "all" | "mine" | "manager_team") => {
+                  setScopeMode(value);
+                  setSelectedManagerId("all");
+                  setSelectedSalespersonId("all");
+                }}
+              >
+                <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                  <SelectValue placeholder="Scope" />
+                </SelectTrigger>
+                <SelectContent>
+                  {!isSupervisor && <SelectItem value="all">My Team</SelectItem>}
+                  <SelectItem value="mine">Mine</SelectItem>
+                  <SelectItem value="manager_team">{isSupervisor ? "Manager Team" : "Salesperson"}</SelectItem>
+                </SelectContent>
+              </Select>
+              {isSupervisor && (
+                <Select value={selectedManagerId} onValueChange={setSelectedManagerId} disabled={scopeMode !== "manager_team"}>
+                  <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                    <SelectValue placeholder="Manager" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Select manager</SelectItem>
+                    {managerOptions.map((m) => (
+                      <SelectItem key={m.user_id} value={m.user_id}>{m.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={selectedSalespersonId} onValueChange={setSelectedSalespersonId} disabled={scopeMode !== "manager_team"}>
+                <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
+                  <SelectValue placeholder="Salesperson" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All salespeople</SelectItem>
+                  {filteredSalespersonOptions.map((sp) => (
+                    <SelectItem key={sp.user_id} value={sp.user_id}>{sp.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
           <p className="text-sm font-medium font-body text-foreground">Period</p>
           <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
             <SelectTrigger className="h-10 rounded-xl bg-card px-3 text-sm font-body">
               <SelectValue placeholder="Period" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">Last 7 days</SelectItem>
-              <SelectItem value="month">This month</SelectItem>
-              <SelectItem value="quarter">This quarter</SelectItem>
-              <SelectItem value="year">This year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
+              <PeriodSelectItems />
             </SelectContent>
           </Select>
           {preset === "custom" && (

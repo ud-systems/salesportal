@@ -6,16 +6,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KpiCard } from "@/components/KpiCard";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShoppingCart, Users, FileDown, FileText, LayoutList, Info, ListChecks } from "lucide-react";
+import { ShoppingCart, Users, FileDown, FileText, LayoutList, Info, ListChecks, ChartNoAxesCombined, RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useScopeOrderTimeseries,
   useScopeFinancialBreakdown,
+  useScopeShopifySalesBreakdown,
   useAnalyticsOverviewKpis,
   useAnalyticsRfmGroupBreakdown,
   useAnalyticsRfmScoreMatrix,
+  triggerOrderFinancialRefresh,
 } from "@/hooks/use-shopify-data";
-import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { differenceInCalendarDays } from "date-fns";
 import { formatDisplayDate, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -29,12 +32,12 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
 import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
+import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useAdminOrderFinancialReconciliationCandidates } from "@/hooks/use-admin-order-reconciliation";
-import { ChartNoAxesCombined } from "lucide-react";
 
 const PREVIEW_ROW_CAP = 200;
 const RECON_CSV_COLUMNS = [
@@ -65,27 +68,6 @@ let logoBadgeDataUrlPromise: Promise<string | null> | null = null;
 
 function reportFileSlug(id: string) {
   return id.replace(/_/g, "-");
-}
-
-function formatPresetLabel(preset: DatePreset): string {
-  switch (preset) {
-    case "all":
-      return "All Time";
-    case "today":
-      return "Today";
-    case "week":
-      return "Last 7 Days";
-    case "month":
-      return "This Month";
-    case "quarter":
-      return "This Quarter";
-    case "year":
-      return "This Year";
-    case "custom":
-      return "Custom Range";
-    default:
-      return "Period";
-  }
 }
 
 function getDisplayCurrencyLabel(currencyCode: string): string {
@@ -202,6 +184,7 @@ export default function AnalyticsPage() {
   const [previewScrollProgress, setPreviewScrollProgress] = useState(0);
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
   const [reconOnlyFlagged, setReconOnlyFlagged] = useState(true);
+  const [reconResyncing, setReconResyncing] = useState(false);
 
   const range = useMemo(
     () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
@@ -225,6 +208,12 @@ export default function AnalyticsPage() {
   } = useAdminOrderFinancialReconciliationCandidates(fromIso, toIso, reconOnlyFlagged, 500, reconQueryEnabled);
 
   const { data: metrics, isLoading: loadingMetrics } = useScopeFinancialBreakdown(
+    user?.id,
+    fromIso,
+    toIso,
+    Boolean(user?.id),
+  );
+  const { data: shopifySalesBreakdown, isLoading: loadingShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
     user?.id,
     fromIso,
     toIso,
@@ -510,6 +499,44 @@ export default function AnalyticsPage() {
     toast.success("Reconciliation CSV downloaded");
   };
 
+  const handleReconResyncListedFromShopify = async () => {
+    if (!reconRows.length) return;
+    setReconResyncing(true);
+    try {
+      const ids = reconRows.map((r) => r.shopify_order_id).filter(Boolean);
+      const data = (await triggerOrderFinancialRefresh({ shopify_order_ids: ids })) as {
+        refreshed?: number;
+        failed?: number;
+      };
+      toast.success(
+        `Shopify re-fetch finished: ${Number(data?.refreshed ?? 0)} updated, ${Number(data?.failed ?? 0)} failed (max 40 per run).`,
+      );
+      await refetchRecon();
+    } catch (e) {
+      toast.error(getReadableErrorMessage(e, "Re-fetch from Shopify failed"));
+    } finally {
+      setReconResyncing(false);
+    }
+  };
+
+  const handleReconResyncStaleRefundedGlobal = async () => {
+    setReconResyncing(true);
+    try {
+      const data = (await triggerOrderFinancialRefresh({ auto_stale_refunded_totals_match: true })) as {
+        refreshed?: number;
+        failed?: number;
+      };
+      toast.success(
+        `Stale refunded-like orders: ${Number(data?.refreshed ?? 0)} updated, ${Number(data?.failed ?? 0)} failed.`,
+      );
+      await refetchRecon();
+    } catch (e) {
+      toast.error(getReadableErrorMessage(e, "Stale-order refresh failed"));
+    } finally {
+      setReconResyncing(false);
+    }
+  };
+
   useEffect(() => {
     if (!reconIsError || !reconQueryError) return;
     toast.error(getReadableErrorMessage(reconQueryError, "Could not load order reconciliation."));
@@ -552,13 +579,7 @@ export default function AnalyticsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">Last 7 days</SelectItem>
-              <SelectItem value="month">This month</SelectItem>
-              <SelectItem value="quarter">This quarter</SelectItem>
-              <SelectItem value="year">This year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
+              <PeriodSelectItems />
             </SelectContent>
           </Select>
         </div>
@@ -592,7 +613,20 @@ export default function AnalyticsPage() {
 
         <TabsContent value="overview" className="space-y-6">
           <div className="space-y-3">
-            <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
+            <ShopifySalesBreakdownSection
+              breakdown={shopifySalesBreakdown}
+              loading={loadingShopifySalesBreakdown}
+              currency={currency}
+              delayBase={50}
+            />
+            <RetailFinancialKpiSection
+              metrics={metrics}
+              loading={loadingMetrics}
+              currency={currency}
+              delayBase={100}
+              collapsible
+              defaultOpen={false}
+            />
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <KpiCard
                 title="Total orders"
@@ -645,10 +679,33 @@ export default function AnalyticsPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => void refetchRecon()}
-                      disabled={reconLoading}
+                      disabled={reconLoading || reconResyncing}
                       className="font-body"
                     >
                       Refresh
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => void handleReconResyncListedFromShopify()}
+                      disabled={!reconRows.length || reconLoading || reconResyncing}
+                      className="font-body"
+                      title="Re-fetch up to 40 listed orders from Shopify Admin (same payload as webhooks)."
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-1.5 ${reconResyncing ? "animate-spin" : ""}`} />
+                      Re-sync listed
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleReconResyncStaleRefundedGlobal()}
+                      disabled={reconLoading || reconResyncing}
+                      className="font-body"
+                      title="Orders with refunded-like status but current_total still equals total (Shopify timing); max 40."
+                    >
+                      Stale refunded scan
                     </Button>
                     <Button
                       type="button"

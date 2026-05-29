@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.admin-users]
 verify_jwt = false
+
+[functions.push-config]
+verify_jwt = false
+
+[functions.push-setup]
+verify_jwt = false

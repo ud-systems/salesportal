@@ -17,7 +17,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy:functions:shopify": "supabase functions deploy shopify-test --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt && supabase functions deploy shopify-sync --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt && supabase functions deploy shopify-webhook --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt"
+    "deploy:functions:shopify": "npx supabase functions deploy shopify-test --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt && npx supabase functions deploy shopify-sync --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt && npx supabase functions deploy shopify-webhook --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt && npx supabase functions deploy push-config --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt && npx supabase functions deploy push-setup --project-ref xbmpndatdanjewhwxzxr --no-verify-jwt",
+    "generate:vapid-keys": "node scripts/generate-vapid-keys.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -98,6 +99,7 @@
     "vite": "^8.0.2",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.1.1",
+    "web-push": "^3.6.7",
     "workbox-window": "^7.4.1"
   }
 }

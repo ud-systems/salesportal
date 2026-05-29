@@ -199,11 +199,23 @@ export type Database = {
           order_number: string | null
           original_total: number | null
           processed_at: string | null
+          reporting_line_items_gross: number | null
+          reporting_total_discounts: number | null
+          reporting_total_refunded: number | null
+          reporting_total_shipping: number | null
+          shipping_address1: string | null
+          shipping_address2: string | null
+          shipping_city: string | null
+          shipping_country: string | null
+          shipping_name: string | null
+          shipping_province: string | null
+          shipping_zip: string | null
           shopify_created_at: string | null
           shopify_customer_id: string | null
           shopify_order_id: string
           subtotal: number | null
           tags: string | null
+          taxes_included: boolean | null
           test_order: boolean | null
           total: number | null
           total_tax: number | null
@@ -223,11 +235,23 @@ export type Database = {
           order_number?: string | null
           original_total?: number | null
           processed_at?: string | null
+          reporting_line_items_gross?: number | null
+          reporting_total_discounts?: number | null
+          reporting_total_refunded?: number | null
+          reporting_total_shipping?: number | null
+          shipping_address1?: string | null
+          shipping_address2?: string | null
+          shipping_city?: string | null
+          shipping_country?: string | null
+          shipping_name?: string | null
+          shipping_province?: string | null
+          shipping_zip?: string | null
           shopify_created_at?: string | null
           shopify_customer_id?: string | null
           shopify_order_id: string
           subtotal?: number | null
           tags?: string | null
+          taxes_included?: boolean | null
           test_order?: boolean | null
           total?: number | null
           total_tax?: number | null
@@ -247,11 +271,23 @@ export type Database = {
           order_number?: string | null
           original_total?: number | null
           processed_at?: string | null
+          reporting_line_items_gross?: number | null
+          reporting_total_discounts?: number | null
+          reporting_total_refunded?: number | null
+          reporting_total_shipping?: number | null
+          shipping_address1?: string | null
+          shipping_address2?: string | null
+          shipping_city?: string | null
+          shipping_country?: string | null
+          shipping_name?: string | null
+          shipping_province?: string | null
+          shipping_zip?: string | null
           shopify_created_at?: string | null
           shopify_customer_id?: string | null
           shopify_order_id?: string
           subtotal?: number | null
           tags?: string | null
+          taxes_included?: boolean | null
           test_order?: boolean | null
           total?: number | null
           total_tax?: number | null
@@ -582,6 +618,39 @@ export type Database = {
         }
         Relationships: []
       }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          id: string
+          p256dh: string
+          updated_at: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          p256dh: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          p256dh?: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_notifications: {
         Row: {
           id: string
@@ -645,6 +714,53 @@ export type Database = {
           avg_order_value: number
         }[]
       }
+      get_scope_shopify_sales_breakdown: {
+        Args: { _viewer_user_id: string; _from_iso?: string; _to_iso?: string }
+        Returns: {
+          gross_sales_line_list: number
+          discounts: number
+          returns_refunded: number
+          net_sales_derived: number
+          shipping: number
+          taxes: number
+          total_sales_check: number
+          orders_in_scope: number
+          orders_missing_reporting: number
+        }[]
+      }
+      get_scope_shopify_sales_breakdown_for_viewers: {
+        Args: { _viewer_user_ids: string[]; _from_iso?: string; _to_iso?: string }
+        Returns: {
+          gross_sales_line_list: number
+          discounts: number
+          returns_refunded: number
+          net_sales_derived: number
+          shipping: number
+          taxes: number
+          total_sales_check: number
+          orders_in_scope: number
+          orders_missing_reporting: number
+        }[]
+      }
+      get_selected_salespeople_shopify_sales_breakdown: {
+        Args: {
+          _viewer_user_id: string
+          _salesperson_user_ids?: string[]
+          _from_iso?: string
+          _to_iso?: string
+        }
+        Returns: {
+          gross_sales_line_list: number
+          discounts: number
+          returns_refunded: number
+          net_sales_derived: number
+          shipping: number
+          taxes: number
+          total_sales_check: number
+          orders_in_scope: number
+          orders_missing_reporting: number
+        }[]
+      }
       get_shopify_order_items_for_viewer: {
         Args: { _order_id: string; _viewer_user_id: string }
         Returns: Database["public"]["Tables"]["shopify_order_items"]["Row"][]
@@ -684,6 +800,10 @@ export type Database = {
           missing_current_total: boolean | null
           flag_reasons: string | null
         }[]
+      }
+      get_shopify_order_ids_stale_refunded_totals: {
+        Args: { _limit?: number }
+        Returns: { shopify_order_id: string }[]
       }
     }
     Enums: {

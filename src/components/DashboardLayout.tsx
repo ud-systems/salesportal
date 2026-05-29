@@ -1,6 +1,7 @@
 import { AppSidebar } from "@/components/AppSidebar";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PostLoginNotifications } from "@/components/PostLoginNotifications";
+import { NotificationBell } from "@/components/NotificationBell";
 import { Outlet } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,9 @@ export default function DashboardLayout() {
     <div className="min-h-screen flex w-full gradient-bg">
       <PostLoginNotifications />
       <AppSidebar />
+      <div className="fixed top-4 right-4 z-50 lg:hidden">
+        <NotificationBell />
+      </div>
       <main
         className={cn(
           "flex-1 min-w-0 p-4 pt-16 lg:p-6 lg:pt-6 overflow-x-hidden",

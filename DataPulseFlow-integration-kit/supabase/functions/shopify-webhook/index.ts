@@ -16,7 +16,7 @@ import {
   SP_ASSIGNED_METAFIELD_KEYS_ORDERED,
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
-import { mapShopifyOrderMoneyFields } from "../_shared/shopify-order-totals.ts";
+import { SHOPIFY_ORDER_DETAIL_GQL, upsertShopifyOrderFromGraphqlNode } from "../_shared/shopify-order-graphql-upsert.ts";
 
 type SalespersonRow = { user_id: string; salesperson_name: string | null };
 
@@ -291,116 +291,24 @@ Deno.serve(async (req) => {
     };
 
     const upsertOrderByGid = async (orderGid: string) => {
-      const { data } = await buildShopifyQuery(
-        shopDomain,
-        adminToken,
-        `query($id: ID!) {
-          order(id: $id) {
-            id
-            name
-            email
-            currencyCode
-            test
-            note
-            tags
-            createdAt
-            processedAt
-            displayFinancialStatus
-            displayFulfillmentStatus
-            subtotalPriceSet { shopMoney { amount } }
-            currentTotalTaxSet { shopMoney { amount } }
-            totalPriceSet { shopMoney { amount currencyCode } }
-            originalTotalPriceSet { shopMoney { amount } }
-            currentTotalPriceSet { shopMoney { amount currencyCode } }
-            customer { id displayName defaultEmailAddress { emailAddress } }
-            lineItems(first: 100) {
-              edges {
-                node {
-                  id
-                  title
-                  variantTitle
-                  quantity
-                  sku
-                  variant { id sku }
-                  originalUnitPriceSet { shopMoney { amount } }
-                }
-              }
-            }
-          }
-        }`,
-        { id: orderGid },
-      );
-      const o = data?.order;
-      if (!o?.id) return null;
-      const shopifyOrderId = String(o.id).replace("gid://shopify/Order/", "");
-      const shopifyCustomerId = o.customer?.id ? String(o.customer.id).replace("gid://shopify/Customer/", "") : null;
-      let customerUuid: string | null = null;
-      if (shopifyCustomerId) {
+      const { data } = await buildShopifyQuery(shopDomain, adminToken, SHOPIFY_ORDER_DETAIL_GQL, { id: orderGid });
+      const resolveCustomer = async (customerGid: string | null) => {
+        if (!customerGid) return null;
+        const shopifyCustomerNumeric = customerGid.replace("gid://shopify/Customer/", "");
         const { data: customerRow } = await supabase
           .from("shopify_customers")
           .select("id")
-          .eq("shopify_customer_id", shopifyCustomerId)
+          .eq("shopify_customer_id", shopifyCustomerNumeric)
           .maybeSingle();
-        customerUuid = customerRow?.id || null;
-        if (!customerUuid && o.customer?.id) {
-          customerUuid = await upsertCustomerByGid(String(o.customer.id));
-        }
-      }
-      const orderTags = Array.isArray(o.tags) ? o.tags.join(", ") : "";
-      const money = mapShopifyOrderMoneyFields(o);
-      const { data: orderRows, error: orderErr } = await supabase
-        .from("shopify_orders")
-        .upsert({
-          shopify_order_id: shopifyOrderId,
-          order_number: o.name,
-          customer_id: customerUuid,
-          shopify_customer_id: shopifyCustomerId,
-          customer_name: o.customer?.displayName || "Unknown",
-          email: o.email || o.customer?.defaultEmailAddress?.emailAddress || null,
-          total: money.total,
-          original_total: money.original_total,
-          current_total: money.current_total,
-          currency_code: o.currencyCode || o.totalPriceSet?.shopMoney?.currencyCode || null,
-          subtotal: parseFloat(o.subtotalPriceSet?.shopMoney?.amount || "0") || null,
-          total_tax: parseFloat(o.currentTotalTaxSet?.shopMoney?.amount || "0") || null,
-          financial_status: String(o.displayFinancialStatus || "PENDING").toLowerCase(),
-          fulfillment_status: String(o.displayFulfillmentStatus || "UNFULFILLED").toLowerCase(),
-          shopify_created_at: o.createdAt,
-          processed_at: o.processedAt || null,
-          order_note: o.note || null,
-          tags: orderTags || null,
-          test_order: Boolean(o.test),
-        }, { onConflict: "shopify_order_id" })
-        .select("id")
-        .single();
-      if (orderErr) throw orderErr;
-      const orderId = orderRows?.id;
-      if (!orderId) return null;
-
-      await supabase.from("shopify_order_items").delete().eq("order_id", orderId);
-      const lineItems = (o.lineItems?.edges || []).map((e: { node: Record<string, unknown> }) => {
-        const n = e.node as {
-          id?: string;
-          title?: string;
-          variantTitle?: string;
-          quantity?: number;
-          sku?: string | null;
-          variant?: { id?: string; sku?: string | null } | null;
-          originalUnitPriceSet?: { shopMoney?: { amount?: string } };
-        };
-        return {
-          order_id: orderId,
-          shopify_line_item_id: n.id ? String(n.id).replace("gid://shopify/LineItem/", "") : null,
-          shopify_variant_gid: n.variant?.id || null,
-          product: n.title || null,
-          variant: n.variantTitle || "Default",
-          sku: n.variant?.sku || n.sku || null,
-          quantity: n.quantity || 0,
-          price: parseFloat(n.originalUnitPriceSet?.shopMoney?.amount || "0"),
-        };
-      });
-      if (lineItems.length > 0) await supabase.from("shopify_order_items").insert(lineItems);
-      return orderId;
+        if (customerRow?.id) return customerRow.id;
+        return await upsertCustomerByGid(customerGid);
+      };
+      const row = await upsertShopifyOrderFromGraphqlNode(
+        supabase,
+        data?.order as Record<string, unknown> | undefined,
+        resolveCustomer,
+      );
+      return row?.orderId ?? null;
     };
 
     const upsertProductByGid = async (productGid: string) => {

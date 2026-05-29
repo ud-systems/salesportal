@@ -8,6 +8,8 @@
  * Usage:
  *   node scripts/trigger-shopify-sync.mjs
  *   node scripts/trigger-shopify-sync.mjs --module orders --reset-orders-checkpoint
+ *   node scripts/trigger-shopify-sync.mjs --refresh-order-ids 123,456
+ *   node scripts/trigger-shopify-sync.mjs --refresh-auto-stale-refunded
  *
  * Defaults VITE_SUPABASE_URL from ../.env if present.
  */
@@ -48,6 +50,8 @@ function argValue(name, def) {
 const moduleArg = argValue("--module", "");
 const resetOrders = argFlag("--reset-orders-checkpoint");
 const resetCustomers = argFlag("--reset-customer-checkpoint");
+const refreshOrderIdsArg = argValue("--refresh-order-ids", "");
+const refreshAutoStaleRefunded = argFlag("--refresh-auto-stale-refunded");
 
 const baseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const cronSecret = (process.env.SHOPIFY_CRON_SECRET || "").trim();
@@ -63,11 +67,23 @@ if (!cronSecret && !jwt) {
 }
 
 const url = `${baseUrl}/functions/v1/shopify-sync`;
+const refreshIds = refreshOrderIdsArg
+  ? refreshOrderIdsArg
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : [];
+
 const body = {
   ...(moduleArg ? { module: moduleArg } : {}),
   ...(resetOrders ? { reset_orders_checkpoint: true } : {}),
   ...(resetCustomers ? { reset_customer_checkpoint: true } : {}),
+  ...(refreshIds.length ? { refresh_shopify_order_ids: refreshIds } : {}),
+  ...(refreshAutoStaleRefunded ? { refresh_auto_stale_financial: true } : {}),
 };
+
+const refreshOnly = Boolean(refreshIds.length || refreshAutoStaleRefunded);
+const fetchTimeoutMs = refreshOnly ? 180_000 : 400_000;
 
 const headers = {
   "Content-Type": "application/json",
@@ -77,11 +93,15 @@ const headers = {
 };
 
 console.log("POST", url, JSON.stringify(body));
-const res = await fetch(url, {
+const fetchOpts = {
   method: "POST",
   headers,
   body: JSON.stringify(body),
-});
+};
+if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+  fetchOpts.signal = AbortSignal.timeout(fetchTimeoutMs);
+}
+const res = await fetch(url, fetchOpts);
 
 const text = await res.text();
 let json;

@@ -57,12 +57,14 @@ export function BottomSheet({ open, onClose, title, children, footer }: BottomSh
           !dragging && "transition-transform duration-300"
         )}
         style={{ transform: `translateY(${translateY}px)` }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       >
-        {/* Drag handle */}
-        <div className="flex justify-center pt-3 pb-1 cursor-grab">
+        {/* Drag handle — only this strip dismisses on swipe so selects/inputs inside stay usable */}
+        <div
+          className="flex justify-center pt-3 pb-1 cursor-grab touch-none"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
         </div>
 

@@ -6,14 +6,24 @@ import {
   subMonths,
   subQuarters,
   subYears,
+  subWeeks,
   startOfQuarter,
-  endOfQuarter,
   startOfMonth,
   startOfYear,
+  startOfWeek,
   differenceInCalendarDays,
 } from "date-fns";
 
-export type DatePreset = "all" | "today" | "week" | "month" | "quarter" | "year" | "custom";
+export type DatePreset =
+  | "all"
+  | "today"
+  | "yesterday"
+  | "wtd"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  | "custom";
 
 export type DateRangeResult = {
   from: Date | null;
@@ -21,6 +31,41 @@ export type DateRangeResult = {
   compareFrom: Date | null;
   compareTo: Date | null;
 };
+
+/** UK retail week: Monday start through end of today. */
+const WEEK_STARTS_ON = 1 as const;
+
+export function formatPresetLabel(preset: DatePreset): string {
+  switch (preset) {
+    case "all":
+      return "All time";
+    case "today":
+      return "Today";
+    case "yesterday":
+      return "Yesterday";
+    case "wtd":
+      return "Week to date";
+    case "week":
+      return "Last 7 days";
+    case "month":
+      return "This month";
+    case "quarter":
+      return "This quarter";
+    case "year":
+      return "This year";
+    case "custom":
+      return "Custom range";
+    default:
+      return "Period";
+  }
+}
+
+export function trendTitleForPreset(preset: DatePreset, topic: "revenue" | "generic" = "generic"): string {
+  if (preset === "all" && topic === "revenue") return "All Time Revenue Trend";
+  const label = formatPresetLabel(preset);
+  if (topic === "revenue") return `${label} Revenue Trend`;
+  return `${label} Trend`;
+}
 
 export function getDashboardRange(
   preset: DatePreset,
@@ -47,6 +92,22 @@ export function getDashboardRange(
     const from = startOfDay(now);
     const y = subDays(now, 1);
     return { from, to, compareFrom: startOfDay(y), compareTo: endOfDay(y) };
+  }
+
+  if (preset === "yesterday") {
+    const y = subDays(now, 1);
+    const from = startOfDay(y);
+    const dayEnd = endOfDay(y);
+    const py = subDays(y, 1);
+    return { from, to: dayEnd, compareFrom: startOfDay(py), compareTo: endOfDay(py) };
+  }
+
+  if (preset === "wtd") {
+    const from = startOfWeek(now, { weekStartsOn: WEEK_STARTS_ON });
+    const compareStart = startOfWeek(subWeeks(now, 1), { weekStartsOn: WEEK_STARTS_ON });
+    const offset = differenceInCalendarDays(now, from);
+    const compareTo = endOfDay(addDays(compareStart, offset));
+    return { from, to, compareFrom: compareStart, compareTo };
   }
 
   if (preset === "week") {

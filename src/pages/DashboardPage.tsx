@@ -7,6 +7,7 @@ import {
   useRecentOrdersInRange,
   useScopeOrderTimeseries,
   useScopeFinancialBreakdown,
+  useScopeShopifySalesBreakdown,
   useTopCustomers,
 } from "@/hooks/use-shopify-data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,9 +15,11 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
+import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -42,26 +45,7 @@ export default function DashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
-  const trendLabel = useMemo(() => {
-    switch (preset) {
-      case "all":
-        return "All Time";
-      case "today":
-        return "Today";
-      case "week":
-        return "Last 7 Days";
-      case "month":
-        return "This Month";
-      case "quarter":
-        return "This Quarter";
-      case "year":
-        return "This Year";
-      case "custom":
-        return "Custom Range";
-      default:
-        return "Selected Range";
-    }
-  }, [preset]);
+  const trendLabel = useMemo(() => formatPresetLabel(preset), [preset]);
 
   const { data: allBreakdown, isLoading: loadingAllBreakdown } = useScopeFinancialBreakdown(user?.id, null, null, Boolean(user?.id));
   const { data: rangeBreakdown, isLoading: loadingRangeBreakdown } = useScopeFinancialBreakdown(
@@ -76,6 +60,18 @@ export default function DashboardPage() {
     cmpFromIso,
     cmpToIso,
     !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
+  );
+  const { data: allShopifySalesBreakdown, isLoading: loadingAllShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
+    user?.id,
+    null,
+    null,
+    Boolean(user?.id),
+  );
+  const { data: rangeShopifySalesBreakdown, isLoading: loadingRangeShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
+    user?.id,
+    fromIso,
+    toIso,
+    !isAll && Boolean(user?.id),
   );
   const { data: chartSeries = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
     user?.id,
@@ -104,6 +100,9 @@ export default function DashboardPage() {
   const loadingOrdersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
   const loadingCustomersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
   const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
+
+  const loadingShopifySalesBreakdown = isAll ? loadingAllShopifySalesBreakdown : loadingRangeShopifySalesBreakdown;
+  const shopifySalesBreakdown = isAll ? allShopifySalesBreakdown : rangeShopifySalesBreakdown;
 
   const chartData = useMemo(
     () => chartSeries.map((p) => ({ label: p.label, revenue: p.revenue, orders: p.orders })),
@@ -161,13 +160,7 @@ export default function DashboardPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">Last 7 days</SelectItem>
-              <SelectItem value="month">This month</SelectItem>
-              <SelectItem value="quarter">This quarter</SelectItem>
-              <SelectItem value="year">This year</SelectItem>
-              <SelectItem value="custom">Custom</SelectItem>
+              <PeriodSelectItems />
             </SelectContent>
           </Select>
         </div>
@@ -190,17 +183,23 @@ export default function DashboardPage() {
         {!isAll && (
           <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
             Compared to previous equivalent period
-            {revDelta != null ? ` · Current gross sales ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
+            {revDelta != null ? ` · Total sales (orders) ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
           </p>
         )}
       </div>
 
       <div className="space-y-3">
+        <ShopifySalesBreakdownSection
+          breakdown={shopifySalesBreakdown}
+          loading={loadingShopifySalesBreakdown}
+          currency={currency}
+          delayBase={50}
+        />
         <RetailFinancialKpiSection
           metrics={isAll ? allBreakdown : rangeBreakdown}
           loading={loadingRevenueTotal}
           currency={currency}
-          delayBase={50}
+          delayBase={100}
         />
         <div className="grid grid-cols-2 lg:grid-cols-2 gap-3 lg:gap-4">
           <KpiCard

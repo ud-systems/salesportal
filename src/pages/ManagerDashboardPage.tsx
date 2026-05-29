@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Users, ShoppingCart } from "lucide-react";
 import { KpiCard } from "@/components/KpiCard";
 import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
+import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -10,11 +11,15 @@ import {
   useSalespersonFinancialBreakdown,
   useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
+  useScopeShopifySalesBreakdown,
+  useSelectedSalespeopleShopifySalesBreakdown,
+  emptyScopeShopifySalesBreakdown,
   useSalespeopleScopedMetricsAndSeries,
 } from "@/hooks/use-shopify-data";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { formatOrderMoney } from "@/lib/format";
-import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, trendTitleForPreset, type DatePreset } from "@/lib/dashboard-date-range";
+import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { differenceInCalendarDays } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
@@ -72,24 +77,7 @@ export default function ManagerDashboardPage() {
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
-  const trendTitle = useMemo(() => {
-    switch (preset) {
-      case "today":
-        return "Today Trend";
-      case "week":
-        return "Last 7 Days Trend";
-      case "month":
-        return "This Month Trend";
-      case "quarter":
-        return "This Quarter Trend";
-      case "year":
-        return "This Year Trend";
-      case "custom":
-        return "Custom Range Trend";
-      default:
-        return "Trend";
-    }
-  }, [preset]);
+  const trendTitle = useMemo(() => trendTitleForPreset(preset), [preset]);
 
   const { data: teamMemberOptions = [] } = useManagerTeamMemberOptions(user?.id, scopeKey);
   /**
@@ -164,6 +152,31 @@ export default function ManagerDashboardPage() {
   const series = scopeMode === "team" ? allSeries : (selectedSeries.length ? selectedSeries : scopedData?.series ?? []);
   const loadingMetrics = scopeMode === "team" ? loadingAllMetrics : loadingScopedData || loadingSelectedSeries;
   const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
+
+  const { data: shopifyLayer2Team, isLoading: loadingShopifyLayer2Team } = useScopeShopifySalesBreakdown(
+    user?.id,
+    fromIso,
+    toIso,
+    Boolean(user?.id) && scopeMode === "team",
+  );
+  const { data: shopifyLayer2Scoped, isLoading: loadingShopifyLayer2Scoped } = useSelectedSalespeopleShopifySalesBreakdown(
+    user?.id,
+    scopedSalespersonIds,
+    fromIso,
+    toIso,
+    Boolean(user?.id) && scopeMode !== "team" && scopedSalespersonIds.length > 0,
+  );
+  const shopifySalesBreakdown = useMemo(
+    () =>
+      scopeMode === "team"
+        ? shopifyLayer2Team
+        : scopedSalespersonIds.length > 0
+          ? shopifyLayer2Scoped
+          : emptyScopeShopifySalesBreakdown(),
+    [scopeMode, scopedSalespersonIds.length, shopifyLayer2Team, shopifyLayer2Scoped],
+  );
+  const loadingShopifySalesBreakdown =
+    scopeMode === "team" ? loadingShopifyLayer2Team : scopedSalespersonIds.length > 0 ? loadingShopifyLayer2Scoped : false;
 
   type BreakdownRow = {
     salesperson_user_id: string;
@@ -285,12 +298,7 @@ export default function ManagerDashboardPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="week">Last 7 days</SelectItem>
-                <SelectItem value="month">This month</SelectItem>
-                <SelectItem value="quarter">This quarter</SelectItem>
-                <SelectItem value="year">This year</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
+                <PeriodSelectItems includeAll={false} />
               </SelectContent>
             </Select>
           </div>
@@ -369,6 +377,12 @@ export default function ManagerDashboardPage() {
 
       <div className="space-y-3">
         <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
+        <ShopifySalesBreakdownSection
+          breakdown={shopifySalesBreakdown}
+          loading={loadingShopifySalesBreakdown}
+          currency={currency}
+          delayBase={110}
+        />
         <div className="grid grid-cols-1 sm:max-w-xs">
           <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
         </div>
