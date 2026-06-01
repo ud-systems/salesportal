@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import {
   useManagerTeamMemberOptions,
   useOrderById,
+  useOrderFulfillments,
   useOrderItems,
   useOrdersPaginated,
   useSalespeopleUnderManagers,
@@ -279,6 +280,7 @@ export default function OrdersPage() {
   const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const { data: selectedItems } = useOrderItems(selectedOrder?.id);
+  const { data: selectedFulfillments } = useOrderFulfillments(selectedOrder?.id);
   const { data: deepLinkedOrder } = useOrderById(deepLinkedOrderId || undefined);
 
   useEffect(() => {
@@ -637,9 +639,48 @@ export default function OrdersPage() {
                 <p><span className="text-muted-foreground">Currency:</span> {selectedOrder.currency_code || "—"}</p>
                 <p><span className="text-muted-foreground">Payment:</span> {selectedOrder.financial_status || "—"}</p>
                 <p><span className="text-muted-foreground">Fulfillment:</span> {selectedOrder.fulfillment_status || "—"}</p>
+                <p><span className="text-muted-foreground">Latest Tracking #:</span> {selectedOrder.latest_tracking_number || "—"}</p>
+                <p><span className="text-muted-foreground">Carrier:</span> {selectedOrder.latest_tracking_company || "—"}</p>
+                <p><span className="text-muted-foreground">Tracking Status:</span> {selectedOrder.latest_tracking_status || "—"}</p>
+                <p>
+                  <span className="text-muted-foreground">Tracking Link:</span>{" "}
+                  {selectedOrder.latest_tracking_url ? (
+                    <a
+                      href={selectedOrder.latest_tracking_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline underline-offset-2"
+                    >
+                      Open tracking
+                    </a>
+                  ) : "—"}
+                </p>
                 <p><span className="text-muted-foreground">Processed:</span> {formatDisplayDateTime(selectedOrder.processed_at)}</p>
                 <p><span className="text-muted-foreground">Tags:</span> {selectedOrder.tags || "—"}</p>
                 <p><span className="text-muted-foreground">Note:</span> {selectedOrder.order_note || "—"}</p>
+              </div>
+              <div className="rounded-xl border p-4 space-y-2">
+                <p className="font-semibold text-foreground">Fulfillment Tracking</p>
+                {!selectedFulfillments?.length ? (
+                  <p className="text-muted-foreground">No fulfillment tracking found.</p>
+                ) : (
+                  selectedFulfillments.map((f) => (
+                    <div key={f.id} className="rounded-lg border p-3 text-xs space-y-1">
+                      <p><span className="text-muted-foreground">Tracking #:</span> {f.tracking_number || "—"}</p>
+                      <p><span className="text-muted-foreground">Carrier:</span> {f.tracking_company || "—"}</p>
+                      <p><span className="text-muted-foreground">Status:</span> {f.shipment_status || "—"}</p>
+                      <p><span className="text-muted-foreground">Fulfilled:</span> {formatDisplayDateTime(f.fulfilled_at)}</p>
+                      <p>
+                        <span className="text-muted-foreground">Link:</span>{" "}
+                        {f.tracking_url ? (
+                          <a href={f.tracking_url} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+                            Open tracking
+                          </a>
+                        ) : "—"}
+                      </p>
+                    </div>
+                  ))
+                )}
               </div>
               <div className="rounded-xl border p-4 space-y-2">
                 <p className="font-semibold text-foreground">Line Items</p>

@@ -25,6 +25,17 @@ export const SHOPIFY_ORDER_DETAIL_GQL = `query($id: ID!) {
     currentTotalDiscountsSet { shopMoney { amount } }
     currentShippingPriceSet { shopMoney { amount } }
     totalRefundedSet { shopMoney { amount } }
+    fulfillments {
+      id
+      status
+      trackingInfo {
+        company
+        number
+        url
+      }
+      createdAt
+      updatedAt
+    }
     shippingAddress {
       name
       address1
@@ -86,6 +97,98 @@ function extractShippingFields(orderNode: Record<string, unknown>) {
   };
 }
 
+type ShopifyTrackingInfo = {
+  company?: string | null;
+  number?: string | null;
+  url?: string | null;
+};
+
+type ShopifyFulfillmentNode = {
+  id?: string | null;
+  status?: string | null;
+  trackingInfo?: ShopifyTrackingInfo[] | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+function extractFulfillmentRows(orderNode: Record<string, unknown>, orderId: string | null) {
+  const fulfillments = ((orderNode as {
+    fulfillments?: ShopifyFulfillmentNode[] | null;
+  }).fulfillments || []) as ShopifyFulfillmentNode[];
+
+  const rows: Array<Record<string, unknown>> = [];
+  for (const node of fulfillments) {
+    if (!node?.id) continue;
+    const shopifyFulfillmentId = String(node.id).replace("gid://shopify/Fulfillment/", "");
+    const trackingEntries = Array.isArray(node.trackingInfo) ? node.trackingInfo : [];
+    if (trackingEntries.length === 0) {
+      rows.push({
+        order_id: orderId,
+        shopify_fulfillment_id: shopifyFulfillmentId,
+        shipment_status: node.status ? String(node.status).toLowerCase() : null,
+        tracking_company: null,
+        tracking_number: null,
+        tracking_url: null,
+        fulfilled_at: node.createdAt || null,
+        raw_payload: node as unknown as Record<string, unknown>,
+      });
+      continue;
+    }
+    for (const tracking of trackingEntries) {
+      rows.push({
+        order_id: orderId,
+        shopify_fulfillment_id: tracking?.number
+          ? `${shopifyFulfillmentId}:${String(tracking.number)}`
+          : shopifyFulfillmentId,
+        shipment_status: node.status ? String(node.status).toLowerCase() : null,
+        tracking_company: tracking?.company || null,
+        tracking_number: tracking?.number || null,
+        tracking_url: tracking?.url || null,
+        fulfilled_at: node.createdAt || null,
+        raw_payload: node as unknown as Record<string, unknown>,
+      });
+    }
+  }
+  return rows;
+}
+
+function pickLatestTrackingSummary(rows: Array<Record<string, unknown>>) {
+  if (rows.length === 0) {
+    return {
+      latest_tracking_number: null,
+      latest_tracking_url: null,
+      latest_tracking_company: null,
+      latest_tracking_status: null,
+      latest_fulfillment_updated_at: null,
+    };
+  }
+  const latest = rows
+    .slice()
+    .sort((a, b) =>
+      String(b.fulfilled_at || "").localeCompare(String(a.fulfilled_at || "")),
+    )[0];
+  return {
+    latest_tracking_number: (latest.tracking_number as string | null) || null,
+    latest_tracking_url: (latest.tracking_url as string | null) || null,
+    latest_tracking_company: (latest.tracking_company as string | null) || null,
+    latest_tracking_status: (latest.shipment_status as string | null) || null,
+    latest_fulfillment_updated_at: (latest.fulfilled_at as string | null) || null,
+  };
+}
+
+function dedupeFulfillmentRows(rows: Array<Record<string, unknown>>) {
+  const seen = new Set<string>();
+  const out: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    const key = `${String(row.order_id || "")}::${String(row.shopify_fulfillment_id || "")}`;
+    if (!row.shopify_fulfillment_id) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
 /**
  * Upserts shopify_orders + shopify_order_items from a GraphQL `order` node.
  * Caller supplies how to resolve internal customer UUID (full customer sync vs lookup-only).
@@ -117,6 +220,8 @@ export async function upsertShopifyOrderFromGraphqlNode(
   const money = mapShopifyOrderMoneyFields(o as unknown as ShopifyOrderPriceNode);
   const rep = extractOrderReportingFields(o);
   const shipping = extractShippingFields(o);
+  const fulfillmentRows = extractFulfillmentRows(o, null);
+  const fulfillmentSummary = pickLatestTrackingSummary(fulfillmentRows);
 
   const { data: orderRows, error: orderErr } = await supabase
     .from("shopify_orders")
@@ -156,6 +261,11 @@ export async function upsertShopifyOrderFromGraphqlNode(
         reporting_total_shipping: rep.reporting_total_shipping,
         reporting_total_refunded: rep.reporting_total_refunded,
         taxes_included: rep.taxes_included,
+        latest_tracking_number: fulfillmentSummary.latest_tracking_number,
+        latest_tracking_url: fulfillmentSummary.latest_tracking_url,
+        latest_tracking_company: fulfillmentSummary.latest_tracking_company,
+        latest_tracking_status: fulfillmentSummary.latest_tracking_status,
+        latest_fulfillment_updated_at: fulfillmentSummary.latest_fulfillment_updated_at,
       },
       { onConflict: "shopify_order_id" },
     )
@@ -164,6 +274,19 @@ export async function upsertShopifyOrderFromGraphqlNode(
   if (orderErr) throw orderErr;
   const orderId = orderRows?.id as string | undefined;
   if (!orderId) return null;
+
+  const normalizedFulfillmentRows = dedupeFulfillmentRows(extractFulfillmentRows(o, orderId));
+  const { error: delFulfillmentErr } = await supabase
+    .from("shopify_order_fulfillments")
+    .delete()
+    .eq("order_id", orderId);
+  if (delFulfillmentErr) throw delFulfillmentErr;
+  if (normalizedFulfillmentRows.length > 0) {
+    const { error: insFulfillmentErr } = await supabase
+      .from("shopify_order_fulfillments")
+      .insert(normalizedFulfillmentRows);
+    if (insFulfillmentErr) throw insFulfillmentErr;
+  }
 
   await supabase.from("shopify_order_items").delete().eq("order_id", orderId);
   const lineItems = ((o as { lineItems?: { edges?: { node: Record<string, unknown> }[] } }).lineItems?.edges || []).map(

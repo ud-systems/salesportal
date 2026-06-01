@@ -30,6 +30,35 @@ const devWarn = (...args: unknown[]) => {
   console.warn(...args);
 };
 
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const anyErr = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [anyErr.message, anyErr.details, anyErr.hint, anyErr.code].filter(Boolean);
+    if (parts.length > 0) return parts.join(" | ");
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  return "Unknown error";
+}
+
+function dedupeFulfillmentRows(rows: Array<Record<string, unknown>>) {
+  const seen = new Set<string>();
+  const out: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    const key = `${String(row.order_id || "")}::${String(row.shopify_fulfillment_id || "")}`;
+    if (!row.shopify_fulfillment_id) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let out = 0;
@@ -641,7 +670,7 @@ Deno.serve(async (req) => {
       ...(customerNote ? { note: customerNote } : {}),
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
+    const msg = toErrorMessage(err);
     results.customers = { synced: 0, status: "error", error: msg };
     if (customersLogId) {
       await supabase.from("sync_logs").update({
@@ -725,6 +754,17 @@ Deno.serve(async (req) => {
               currentTotalDiscountsSet { shopMoney { amount } }
               currentShippingPriceSet { shopMoney { amount } }
               totalRefundedSet { shopMoney { amount } }
+              fulfillments {
+                id
+                status
+                trackingInfo {
+                  company
+                  number
+                  url
+                }
+                createdAt
+                updatedAt
+              }
               customer { id displayName defaultEmailAddress { emailAddress } }
               lineItems(first: 100) {
                 edges {
@@ -774,6 +814,15 @@ Deno.serve(async (req) => {
       const newOrdersPayload: Array<Record<string, unknown>> = [];
       const updateOrdersPayload: Array<Record<string, unknown>> = [];
       const lineItemsByShopifyOrderId = new Map<string, Array<Record<string, unknown>>>();
+      const fulfillmentsByShopifyOrderId = new Map<string, Array<{
+        shopify_fulfillment_id: string;
+        shipment_status: string | null;
+        tracking_company: string | null;
+        tracking_number: string | null;
+        tracking_url: string | null;
+        fulfilled_at: string | null;
+        raw_payload: Record<string, unknown>;
+      }>>();
 
       for (const edge of edges) {
         if (hitSoftTimeout()) {
@@ -804,6 +853,52 @@ Deno.serve(async (req) => {
         }
         const money = mapShopifyOrderMoneyFields(o);
         const rep = extractOrderReportingFields(o as Record<string, unknown>);
+        const fulfillmentNodes = (o.fulfillments || []) as Array<{
+          id?: string;
+          status?: string;
+          createdAt?: string;
+          trackingInfo?: Array<{ company?: string; number?: string; url?: string }>;
+        }>;
+        const flattenedFulfillments: Array<{
+          shopify_fulfillment_id: string;
+          shipment_status: string | null;
+          tracking_company: string | null;
+          tracking_number: string | null;
+          tracking_url: string | null;
+          fulfilled_at: string | null;
+          raw_payload: Record<string, unknown>;
+        }> = [];
+        for (const node of fulfillmentNodes) {
+          if (!node?.id) continue;
+          const fulfillmentId = String(node.id).replace("gid://shopify/Fulfillment/", "");
+          const trackingInfo = Array.isArray(node.trackingInfo) ? node.trackingInfo : [];
+          if (trackingInfo.length === 0) {
+            flattenedFulfillments.push({
+              shopify_fulfillment_id: fulfillmentId,
+              shipment_status: node.status ? String(node.status).toLowerCase() : null,
+              tracking_company: null,
+              tracking_number: null,
+              tracking_url: null,
+              fulfilled_at: node.createdAt || null,
+              raw_payload: node as unknown as Record<string, unknown>,
+            });
+            continue;
+          }
+          for (const tracking of trackingInfo) {
+            flattenedFulfillments.push({
+              shopify_fulfillment_id: tracking?.number ? `${fulfillmentId}:${String(tracking.number)}` : fulfillmentId,
+              shipment_status: node.status ? String(node.status).toLowerCase() : null,
+              tracking_company: tracking?.company || null,
+              tracking_number: tracking?.number || null,
+              tracking_url: tracking?.url || null,
+              fulfilled_at: node.createdAt || null,
+              raw_payload: node as unknown as Record<string, unknown>,
+            });
+          }
+        }
+        const latestFulfillment = flattenedFulfillments
+          .slice()
+          .sort((a, b) => String(b.fulfilled_at || "").localeCompare(String(a.fulfilled_at || "")))[0];
         const row = {
           shopify_order_id: shopifyOrderId,
           order_number: o.name,
@@ -830,6 +925,11 @@ Deno.serve(async (req) => {
           reporting_total_shipping: rep.reporting_total_shipping,
           reporting_total_refunded: rep.reporting_total_refunded,
           taxes_included: rep.taxes_included,
+          latest_tracking_number: latestFulfillment?.tracking_number || null,
+          latest_tracking_url: latestFulfillment?.tracking_url || null,
+          latest_tracking_company: latestFulfillment?.tracking_company || null,
+          latest_tracking_status: latestFulfillment?.shipment_status || null,
+          latest_fulfillment_updated_at: latestFulfillment?.fulfilled_at || null,
         };
         if (isNewOrder) newOrdersPayload.push(row);
         else updateOrdersPayload.push(row);
@@ -859,6 +959,7 @@ Deno.serve(async (req) => {
           };
         });
         lineItemsByShopifyOrderId.set(shopifyOrderId, lineItems);
+        fulfillmentsByShopifyOrderId.set(shopifyOrderId, flattenedFulfillments);
       }
       const ordersPayload = [...newOrdersPayload, ...updateOrdersPayload];
       if (ordersPayload.length > 0) {
@@ -908,6 +1009,32 @@ Deno.serve(async (req) => {
               if (liErr) throw liErr;
             }
           }
+
+          const { error: deleteFulfillmentErr } = await supabase
+            .from("shopify_order_fulfillments")
+            .delete()
+            .in("order_id", orderIds);
+          if (deleteFulfillmentErr) throw deleteFulfillmentErr;
+
+          const fulfillmentRowsToInsert: Array<Record<string, unknown>> = [];
+          for (const [shopifyOrderId, orderId] of orderIdByShopify.entries()) {
+            const fulfillments = fulfillmentsByShopifyOrderId.get(shopifyOrderId) || [];
+            for (const fulfillment of fulfillments) {
+              fulfillmentRowsToInsert.push({
+                order_id: orderId,
+                ...fulfillment,
+              });
+            }
+          }
+          const dedupedFulfillmentRows = dedupeFulfillmentRows(fulfillmentRowsToInsert);
+          if (dedupedFulfillmentRows.length > 0) {
+            const chunkSize = 1000;
+            for (let i = 0; i < dedupedFulfillmentRows.length; i += chunkSize) {
+              const chunk = dedupedFulfillmentRows.slice(i, i + chunkSize);
+              const { error: insFulfillmentErr } = await supabase.from("shopify_order_fulfillments").insert(chunk);
+              if (insFulfillmentErr) throw insFulfillmentErr;
+            }
+          }
         }
 
         totalSynced += ordersPayload.length;
@@ -945,7 +1072,7 @@ Deno.serve(async (req) => {
       ...(orderNote ? { note: orderNote } : {}),
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
+    const msg = toErrorMessage(err);
     results.orders = { synced: 0, status: "error", error: msg };
     if (ordersLogId) {
       await supabase.from("sync_logs").update({
@@ -1141,7 +1268,7 @@ Deno.serve(async (req) => {
       ...(productNote ? { note: productNote } : {}),
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
+    const msg = toErrorMessage(err);
     results.products = { synced: 0, status: "error", error: msg };
     if (productsLogId) {
       await supabase.from("sync_logs").update({
@@ -1284,7 +1411,7 @@ Deno.serve(async (req) => {
     await finalizeSuccessLog(collectionsLogId, totalSynced, collectionsNote || undefined);
     results.collections = { synced: totalSynced, status: "success", ...(collectionsNote ? { note: collectionsNote } : {}) };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
+    const msg = toErrorMessage(err);
     results.collections = { synced: 0, status: "error", error: msg };
     if (collectionsLogId) {
       await supabase.from("sync_logs").update({
@@ -1408,7 +1535,7 @@ Deno.serve(async (req) => {
       ...(poNote ? { note: poNote } : {}),
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
+    const msg = toErrorMessage(err);
     results.purchase_orders = { synced: 0, status: "error", error: msg };
     if (poLogId) {
       await supabase.from("sync_logs").update({
@@ -1433,7 +1560,7 @@ Deno.serve(async (req) => {
     },
   );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Internal server error";
+    const msg = toErrorMessage(err);
     devError("shopify-sync error:", err);
     return new Response(JSON.stringify({ error: msg }), {
       status: 500,

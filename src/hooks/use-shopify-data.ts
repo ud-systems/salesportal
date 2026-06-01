@@ -158,6 +158,14 @@ export type TeamMemberOption = {
   label: string;
 };
 
+export type SupervisorManagerSelfPerformanceRow = {
+  manager_user_id: string;
+  manager_name: string;
+  customers_count: number;
+  orders_count: number;
+  revenue: number;
+};
+
 export type ShopifyOriginalTotalSyncHealth =
   | { status: "ready" }
   | { status: "migration_required"; message: string }
@@ -232,6 +240,19 @@ export type RecentCustomerOrder = {
   created_at: string | null;
   tags: string | null;
   order_note: string | null;
+};
+
+export type OrderFulfillment = {
+  id: string;
+  order_id: string;
+  shopify_fulfillment_id: string;
+  shipment_status: string | null;
+  tracking_company: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  fulfilled_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 async function fetchAllScopedCustomerIdsForViewer(
@@ -693,6 +714,57 @@ export function useSupervisorManagerScopePerformance(
     }),
     staleTime: 60_000,
     enabled: Boolean(supervisorUserId),
+  });
+}
+
+export function useSupervisorManagerSelfPerformance(
+  supervisorUserId: string | undefined,
+  managerUserId: string | undefined,
+  scopeKey = "global",
+  fromIso: string | null | undefined = null,
+  toIso: string | null | undefined = null,
+) {
+  return useQuery({
+    queryKey: [
+      "supervisor-manager-self-performance",
+      supervisorUserId ?? "none",
+      managerUserId ?? "none",
+      scopeKey,
+      fromIso ?? "none",
+      toIso ?? "none",
+    ],
+    queryFn: async () =>
+      withQueryTiming(
+        "useSupervisorManagerSelfPerformance",
+        {
+          supervisorUserId: supervisorUserId ?? null,
+          managerUserId: managerUserId ?? null,
+          scopeKey,
+          fromIso: fromIso ?? null,
+          toIso: toIso ?? null,
+        },
+        async () => {
+          if (!supervisorUserId || !managerUserId) return null as SupervisorManagerSelfPerformanceRow | null;
+          const { data, error } = await (supabase as any).rpc("get_supervisor_manager_self_performance_row", {
+            _supervisor_user_id: supervisorUserId,
+            _manager_user_id: managerUserId,
+            _from_iso: fromIso ?? null,
+            _to_iso: toIso ?? null,
+          });
+          if (error) throw error;
+          const row = (data?.[0] ?? null) as Partial<SupervisorManagerSelfPerformanceRow> | null;
+          if (!row) return null;
+          return {
+            manager_user_id: String(row.manager_user_id ?? managerUserId),
+            manager_name: String(row.manager_name ?? "Manager"),
+            customers_count: Number(row.customers_count ?? 0),
+            orders_count: Number(row.orders_count ?? 0),
+            revenue: Number(row.revenue ?? 0),
+          } satisfies SupervisorManagerSelfPerformanceRow;
+        },
+      ),
+    staleTime: 60_000,
+    enabled: Boolean(supervisorUserId) && Boolean(managerUserId),
   });
 }
 
@@ -2206,6 +2278,26 @@ export function useOrderItems(orderId?: string) {
       return (data ?? []) as Tables<"shopify_order_items">[];
     },
     enabled: !!orderId,
+  });
+}
+
+export function useOrderFulfillments(orderId?: string) {
+  return useQuery({
+    queryKey: ["shopify-order-fulfillments", orderId],
+    queryFn: async () => {
+      if (!orderId) return [] as OrderFulfillment[];
+      const { data, error } = await supabase
+        .from("shopify_order_fulfillments")
+        .select(
+          "id, order_id, shopify_fulfillment_id, shipment_status, tracking_company, tracking_number, tracking_url, fulfilled_at, created_at, updated_at",
+        )
+        .eq("order_id", orderId)
+        .order("fulfilled_at", { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as OrderFulfillment[];
+    },
+    enabled: !!orderId,
+    staleTime: 30_000,
   });
 }
 

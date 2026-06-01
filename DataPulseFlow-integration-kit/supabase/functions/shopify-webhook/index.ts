@@ -311,6 +311,26 @@ Deno.serve(async (req) => {
       return row?.orderId ?? null;
     };
 
+    const extractOrderGidFromFulfillmentPayload = (payloadObj: Record<string, unknown>): string | null => {
+      const directOrderId = payloadObj.order_id;
+      if (typeof directOrderId === "number" || typeof directOrderId === "string") {
+        const raw = String(directOrderId).trim();
+        if (raw) {
+          const digits = raw.replace(/\D/g, "");
+          if (digits) return `gid://shopify/Order/${digits}`;
+        }
+      }
+      const nestedOrderId = (payloadObj.order as { id?: string | number } | undefined)?.id;
+      if (typeof nestedOrderId === "number" || typeof nestedOrderId === "string") {
+        const raw = String(nestedOrderId).trim();
+        if (raw) {
+          const digits = raw.replace(/\D/g, "");
+          if (digits) return `gid://shopify/Order/${digits}`;
+        }
+      }
+      return null;
+    };
+
     const upsertProductByGid = async (productGid: string) => {
       const { data } = await buildShopifyQuery(
         shopDomain,
@@ -392,6 +412,13 @@ Deno.serve(async (req) => {
         const orderGid = String(payload.admin_graphql_api_id || "");
         if (orderGid) await upsertOrderByGid(orderGid);
         else await markDone("ignored", "order webhook missing admin_graphql_api_id");
+      } else if (topic === "fulfillments/create" || topic === "fulfillments/update") {
+        const orderGid = extractOrderGidFromFulfillmentPayload(payload);
+        if (orderGid) {
+          await upsertOrderByGid(orderGid);
+        } else {
+          await markDone("ignored", "fulfillment webhook missing order_id");
+        }
       } else if (topic === "products/create" || topic === "products/update") {
         const productGid = String(payload.admin_graphql_api_id || "");
         if (productGid) await upsertProductByGid(productGid);

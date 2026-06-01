@@ -8,12 +8,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   useAggregateFinancialBreakdownForViewers,
   useAggregateShopifySalesBreakdownForViewers,
-  useDirectReportSalesPerformance,
   emptyScopeShopifySalesBreakdown,
   useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
   useScopeShopifySalesBreakdown,
   useSelectedSalespeopleShopifySalesBreakdown,
+  useSalespersonFinancialBreakdown,
   useSupervisorSelectedManagerTimeseries,
   useSupervisorManagerScopePerformance,
   useSupervisorSalespersonOptions,
@@ -207,12 +207,24 @@ export default function SupervisorDashboardPage() {
     scopeKey,
     scopeMode !== "all" && scopeMode !== "mine",
   );
-  const { data: selectedManagerTeamRows = [], isLoading: loadingSelectedManagerTeamRows } = useDirectReportSalesPerformance(
-    selectedManagerId !== "all" ? selectedManagerId : undefined,
-    "manager",
-    `${scopeKey}-selected-manager-team`,
+  const selectedManagerTeamEnabled = scopeMode === "manager_team" && selectedManagerId !== "all";
+  /** Same engine as Manager Dashboard: financial breakdown for direct reports. */
+  const { data: teamBreakdownRows = [], isLoading: loadingTeamBreakdown } = useSalespersonFinancialBreakdown(
+    `${scopeKey}-manager-${selectedManagerId}-team`,
     fromIso,
     toIso,
+    selectedManagerId !== "all" ? selectedManagerId : null,
+    "manager",
+    Boolean(user?.id) && selectedManagerTeamEnabled,
+  );
+  /** Manager self row uses scoped salesperson metrics (assignments + name fallback), not cumulative scope. */
+  const { data: managerSelfMetrics, isLoading: loadingManagerSelfMetrics } = useSalespeopleScopedMetricsAndSeries(
+    selectedManagerId !== "all" ? [selectedManagerId] : [],
+    fromIso,
+    toIso,
+    bucket,
+    `${scopeKey}-manager-self-${selectedManagerId}`,
+    Boolean(user?.id) && selectedManagerTeamEnabled,
   );
 
   const metrics =
@@ -325,14 +337,64 @@ export default function SupervisorDashboardPage() {
     if (quickScopedIds) rows = rows.filter((row) => quickScopedIds.has(row.viewer_user_id));
     return rows;
   }, [scopeMode, selectedManagerId, typedRows, user?.id, quickScopedIds]);
-  const selectedManagerScorecard = useMemo(
-    () => typedRows.find((row) => row.viewer_user_id === selectedManagerId),
-    [typedRows, selectedManagerId],
+  type TeamBreakdownRow = {
+    salesperson_user_id: string;
+    salesperson_name: string;
+    customers_count: number;
+    orders_count: number;
+    revenue: number;
+    is_manager_row: boolean;
+  };
+
+  const selectedManagerLabel =
+    managerOptions.find((m) => m.user_id === selectedManagerId)?.label ?? "Manager";
+
+  const managerSelfRow = useMemo((): TeamBreakdownRow | null => {
+    if (!selectedManagerTeamEnabled || !managerSelfMetrics) return null;
+    return {
+      salesperson_user_id: selectedManagerId,
+      salesperson_name: `${selectedManagerLabel} (Manager)`,
+      customers_count: Number(managerSelfMetrics.customers_count || 0),
+      orders_count: Number(managerSelfMetrics.orders_total_count || managerSelfMetrics.orders_count || 0),
+      revenue: Number(managerSelfMetrics.current_gross_sales || managerSelfMetrics.revenue || 0),
+      is_manager_row: true,
+    };
+  }, [selectedManagerTeamEnabled, managerSelfMetrics, selectedManagerId, selectedManagerLabel]);
+
+  const teamRows = useMemo(
+    (): TeamBreakdownRow[] =>
+      teamBreakdownRows.map((row) => ({
+        salesperson_user_id: row.salesperson_user_id,
+        salesperson_name: row.salesperson_name,
+        customers_count: Number(row.customers_count || 0),
+        orders_count: Number(row.orders_total_count || 0),
+        revenue: Number(row.current_gross_sales || 0),
+        is_manager_row: false,
+      })),
+    [teamBreakdownRows],
   );
-  const filteredSelectedManagerTeamRows = useMemo(() => {
-    if (selectedSalespersonId === "all") return selectedManagerTeamRows;
-    return selectedManagerTeamRows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
-  }, [selectedManagerTeamRows, selectedSalespersonId]);
+
+  const selectedManagerTableRows = useMemo(() => {
+    let rows: TeamBreakdownRow[] = managerSelfRow ? [managerSelfRow, ...teamRows] : teamRows;
+    if (selectedSalespersonId !== "all") {
+      rows = rows.filter((row) => row.salesperson_user_id === selectedSalespersonId);
+    }
+    return rows;
+  }, [managerSelfRow, teamRows, selectedSalespersonId]);
+
+  const breakdownTotals = useMemo(
+    () =>
+      selectedManagerTableRows.reduce(
+        (acc, row) => {
+          acc.customers_count += row.customers_count;
+          acc.orders_count += row.orders_count;
+          acc.revenue += row.revenue;
+          return acc;
+        },
+        { customers_count: 0, orders_count: 0, revenue: 0 },
+      ),
+    [selectedManagerTableRows],
+  );
 
   useEffect(() => {
     if (selectedSalespersonId === "all") return;
@@ -505,73 +567,14 @@ export default function SupervisorDashboardPage() {
       </div>
 
       <div className="card-float p-5 opacity-0 animate-fade-in">
-        <h3 className="font-heading font-semibold text-foreground mb-4">Manager Scorecards</h3>
-        {scopeMode === "salesperson" ? (
-          <p className="text-sm text-muted-foreground font-body">Manager scorecards are hidden in salesperson scope.</p>
-        ) : loadingManagers ? (
-          <div className="space-y-2">
-            <Skeleton className="h-9 w-full rounded-lg" />
-            <Skeleton className="h-9 w-full rounded-lg" />
-          </div>
-        ) : filteredRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground font-body">No manager reporting lines found for this supervisor.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm font-body">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="text-left py-2.5 font-medium">Manager</th>
-                  <th className="text-right py-2.5 font-medium">Team members</th>
-                  <th className="text-right py-2.5 font-medium">Registered Customers</th>
-                  <th className="text-right py-2.5 font-medium">Orders</th>
-                  <th className="text-right py-2.5 font-medium">Revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row) => (
-                  <tr key={row.viewer_user_id} className="border-b last:border-0">
-                    <td className="py-3">{row.manager_name}</td>
-                    <td className="py-3 text-right">{row.team_member_count}</td>
-                    <td className="py-3 text-right">{row.team_customers_count}</td>
-                    <td className="py-3 text-right">{row.team_orders_count}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(row.team_revenue, null, currency)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {scopeMode === "manager_team" && selectedManagerId !== "all" && (
+        {scopeMode === "manager_team" && selectedManagerId !== "all" ? (
           <div className="mt-5 space-y-3">
-            {selectedManagerScorecard && (
-              <div className="rounded-xl border bg-card p-4">
-                <p className="text-sm font-semibold text-foreground">{selectedManagerScorecard.manager_name}</p>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <p className="text-muted-foreground">Team members</p>
-                    <p className="font-semibold text-foreground">{selectedManagerScorecard.team_member_count}</p>
-                  </div>
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <p className="text-muted-foreground">Registered Customers</p>
-                    <p className="font-semibold text-foreground">{selectedManagerScorecard.team_customers_count}</p>
-                  </div>
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <p className="text-muted-foreground">Orders</p>
-                    <p className="font-semibold text-foreground">{selectedManagerScorecard.team_orders_count}</p>
-                  </div>
-                  <div className="rounded-lg bg-muted/50 p-2">
-                    <p className="text-muted-foreground">Revenue</p>
-                    <p className="font-semibold text-foreground">{formatOrderMoney(selectedManagerScorecard.team_revenue, null, currency)}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-            {loadingSelectedManagerTeamRows ? (
+            {loadingTeamBreakdown || loadingManagerSelfMetrics ? (
               <div className="space-y-2">
                 <Skeleton className="h-9 w-full rounded-lg" />
                 <Skeleton className="h-9 w-full rounded-lg" />
               </div>
-            ) : filteredSelectedManagerTeamRows.length === 0 ? (
+            ) : selectedManagerTableRows.length === 0 ? (
               <p className="text-sm text-muted-foreground font-body">
                 No team member rows found for the selected manager in this period.
               </p>
@@ -587,19 +590,34 @@ export default function SupervisorDashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSelectedManagerTeamRows.map((row) => (
-                      <tr key={row.salesperson_user_id} className="border-b last:border-0">
+                    {selectedManagerTableRows.map((row) => (
+                      <tr
+                        key={`${row.salesperson_user_id}-${row.is_manager_row ? "manager" : "team"}`}
+                        className={`border-b last:border-0 ${row.is_manager_row ? "bg-muted/60" : ""}`}
+                      >
                         <td className="py-3 px-3">{row.salesperson_name}</td>
                         <td className="py-3 px-3 text-right">{row.customers_count}</td>
                         <td className="py-3 px-3 text-right">{row.orders_count}</td>
                         <td className="py-3 px-3 text-right">{formatOrderMoney(row.revenue, null, currency)}</td>
                       </tr>
                     ))}
+                    {selectedManagerTableRows.length > 1 && selectedSalespersonId === "all" && (
+                      <tr className="border-t-2 border-foreground/20 font-semibold bg-muted/30">
+                        <td className="py-3 px-3">Breakdown total</td>
+                        <td className="py-3 px-3 text-right">{breakdownTotals.customers_count}</td>
+                        <td className="py-3 px-3 text-right">{breakdownTotals.orders_count}</td>
+                        <td className="py-3 px-3 text-right">{formatOrderMoney(breakdownTotals.revenue, null, currency)}</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
+        ) : (
+          <p className="text-sm text-muted-foreground font-body">
+            Select <span className="font-medium">Manager Team</span> scope and choose a manager to view the detailed breakdown.
+          </p>
         )}
       </div>
     </div>

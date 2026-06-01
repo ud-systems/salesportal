@@ -184,6 +184,56 @@ export type Database = {
           },
         ]
       }
+      shopify_order_fulfillments: {
+        Row: {
+          created_at: string | null
+          fulfilled_at: string | null
+          id: string
+          order_id: string
+          raw_payload: Json | null
+          shipment_status: string | null
+          shopify_fulfillment_id: string
+          tracking_company: string | null
+          tracking_number: string | null
+          tracking_url: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          fulfilled_at?: string | null
+          id?: string
+          order_id: string
+          raw_payload?: Json | null
+          shipment_status?: string | null
+          shopify_fulfillment_id: string
+          tracking_company?: string | null
+          tracking_number?: string | null
+          tracking_url?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          fulfilled_at?: string | null
+          id?: string
+          order_id?: string
+          raw_payload?: Json | null
+          shipment_status?: string | null
+          shopify_fulfillment_id?: string
+          tracking_company?: string | null
+          tracking_number?: string | null
+          tracking_url?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopify_order_fulfillments_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "shopify_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shopify_orders: {
         Row: {
           created_at: string | null
@@ -195,6 +245,11 @@ export type Database = {
           financial_status: string | null
           fulfillment_status: string | null
           id: string
+          latest_fulfillment_updated_at: string | null
+          latest_tracking_company: string | null
+          latest_tracking_number: string | null
+          latest_tracking_status: string | null
+          latest_tracking_url: string | null
           order_note: string | null
           order_number: string | null
           original_total: number | null
@@ -231,6 +286,11 @@ export type Database = {
           financial_status?: string | null
           fulfillment_status?: string | null
           id?: string
+          latest_fulfillment_updated_at?: string | null
+          latest_tracking_company?: string | null
+          latest_tracking_number?: string | null
+          latest_tracking_status?: string | null
+          latest_tracking_url?: string | null
           order_note?: string | null
           order_number?: string | null
           original_total?: number | null
@@ -267,6 +327,11 @@ export type Database = {
           financial_status?: string | null
           fulfillment_status?: string | null
           id?: string
+          latest_fulfillment_updated_at?: string | null
+          latest_tracking_company?: string | null
+          latest_tracking_number?: string | null
+          latest_tracking_status?: string | null
+          latest_tracking_url?: string | null
           order_note?: string | null
           order_number?: string | null
           original_total?: number | null
