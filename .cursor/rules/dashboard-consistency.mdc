@@ -5,15 +5,17 @@ globs: src/pages/*Dashboard*.tsx,src/pages/AnalyticsPage.tsx,src/components/Dash
 
 # Dashboard consistency
 
-When adding or changing **revenue KPIs, financial tooltips, or breakdown metrics** (e.g. gross/net, `current_total`, `orders_missing_current_total`):
+When adding or changing **revenue KPIs, financial tooltips, or breakdown metrics**:
 
-1. Update **every** user-facing surface that shows those metrics in the same session:
-   - `DashboardPage.tsx` (salesperson / default)
+1. Update **every** user-facing surface that shows those metrics:
+   - `DashboardPage.tsx` (salesperson)
    - `AdminDashboardPage.tsx`
    - `SupervisorDashboardPage.tsx`
    - `ManagerDashboardPage.tsx`
-   - `AnalyticsPage.tsx` (overview KPIs)
-2. Prefer **shared KPI components** (e.g. `GrossNetRevenueCard`, `OrdersMetricsGroupCard`) over duplicating layout in one role only.
-3. If a new field comes from an RPC, wire it in `use-shopify-data.ts` for **all** hooks that power those pages (e.g. scope breakdown, aggregate for viewers, salespeople scoped metrics), and add/extend a Supabase migration as needed.
+   - `AnalyticsPage.tsx` (overview)
+   - `SalespersonsPage.tsx` (table labels)
+2. Use **one Shopify Analytics pipeline** — `useShopifyAnalyticsDashboard` / `useSelectedSalespeopleShopifyAnalyticsDashboard` / `useAggregateShopifyAnalyticsDashboardForViewers` → `DashboardOverviewSummaryCard`. Do **not** reintroduce `RetailFinancialKpiSection` or duplicate `ShopifySalesBreakdownSection` grids.
+3. Use **Shopify vocabulary only** in UI: Gross sales, Discounts, Returns, Net sales, Shipping charges, Taxes, Total sales. No “CRM”, “current gross”, or “original order total”.
+4. Financial math lives in RPCs (`get_scope_shopify_analytics_dashboard` and patched financial breakdown RPCs), not in frontend reducers.
 
 Do not ship a change to only one dashboard when the same numbers appear elsewhere for other roles.

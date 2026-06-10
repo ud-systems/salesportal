@@ -1,6 +1,8 @@
+import { SHOPIFY_REPORTING_TIMEZONE } from "@/lib/shopify-reporting-timezone";
+
 /** UK-oriented display defaults (align with store / en-GB). */
 export const DISPLAY_LOCALE = "en-GB";
-export const DISPLAY_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+export const DISPLAY_TIMEZONE = SHOPIFY_REPORTING_TIMEZONE;
 export const FALLBACK_STORE_CURRENCY = "GBP";
 
 export function formatDisplayDate(iso: string | Date | null | undefined): string {

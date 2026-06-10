@@ -1,21 +1,20 @@
-import { ShoppingCart, Users, AlertCircle } from "lucide-react";
+import { AlertCircle, ShoppingCart, Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { KpiCard } from "@/components/KpiCard";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
-  useRecentOrders,
   useRecentOrdersInRange,
   useScopeOrderTimeseries,
-  useScopeFinancialBreakdown,
-  useScopeShopifySalesBreakdown,
+  useShopifyAnalyticsDashboard,
+  shopifyAnalyticsToSalesBreakdown,
+  emptyShopifyAnalyticsDashboard,
   useTopCustomers,
 } from "@/hooks/use-shopify-data";
 import { useAuth } from "@/contexts/AuthContext";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
-import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
+import { DashboardOverviewSummaryCard } from "@/components/DashboardOverviewSummaryCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getDashboardRange, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
@@ -29,7 +28,9 @@ export default function DashboardPage() {
   const scopeKey = user?.id ?? "anonymous";
   const { data: currency = "GBP" } = useShopDisplayCurrency();
 
-  const [preset, setPreset] = useState<DatePreset>("all");
+  const [preset, setPreset] = useState<DatePreset>(() =>
+    typeof window !== "undefined" && window.innerWidth < 1024 ? "today" : "all",
+  );
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
@@ -39,70 +40,47 @@ export default function DashboardPage() {
   );
   const fromIso = toRangeIso(range.from);
   const toIso = toRangeIso(range.to);
-  const cmpFromIso = toRangeIso(range.compareFrom);
-  const cmpToIso = toRangeIso(range.compareTo);
-  const isAll = preset === "all";
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
   const trendLabel = useMemo(() => formatPresetLabel(preset), [preset]);
 
-  const { data: allBreakdown, isLoading: loadingAllBreakdown } = useScopeFinancialBreakdown(user?.id, null, null, Boolean(user?.id));
-  const { data: rangeBreakdown, isLoading: loadingRangeBreakdown } = useScopeFinancialBreakdown(
+  const { data: analytics, isLoading: loadingAnalytics } = useShopifyAnalyticsDashboard(
     user?.id,
     fromIso,
     toIso,
-    !isAll && Boolean(user?.id),
-  );
-  const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(5, scopeKey);
-  const { data: metricsCompare } = useScopeFinancialBreakdown(
-    user?.id,
-    cmpFromIso,
-    cmpToIso,
-    !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
-  );
-  const { data: allShopifySalesBreakdown, isLoading: loadingAllShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
-    user?.id,
-    null,
-    null,
     Boolean(user?.id),
-  );
-  const { data: rangeShopifySalesBreakdown, isLoading: loadingRangeShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
-    user?.id,
-    fromIso,
-    toIso,
-    !isAll && Boolean(user?.id),
   );
   const { data: chartSeries = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
     user?.id,
-    isAll ? null : fromIso,
-    isAll ? null : toIso,
-    isAll ? "month" : bucket,
+    fromIso,
+    toIso,
+    bucket,
     scopeKey,
     Boolean(user?.id),
   );
-  const { data: recentFiltered = [], isLoading: loadingRecentFiltered } = useRecentOrdersInRange(
+  const { data: recentOrders = [], isLoading: loadingRecentOrders } = useRecentOrdersInRange(
     5,
     fromIso,
     toIso,
     scopeKey,
-    !isAll,
+    Boolean(user?.id),
   );
 
   const { data: topCustomers = [], isLoading: loadingTopCustomers } = useTopCustomers(3, scopeKey);
+  const totalSales = analytics?.total_sales ?? 0;
+  const totalOrders = analytics?.orders_total ?? 0;
+  const paidOrders = analytics?.orders_paid ?? 0;
+  const pendingOrders = analytics?.orders_pending ?? 0;
+  const refundedOrders = analytics?.orders_refunded ?? 0;
+  const totalCustomers = analytics?.customers_count ?? 0;
+  const unfulfilledOrders = analytics?.orders_unfulfilled ?? 0;
 
-  const currentGross = isAll ? (allBreakdown?.current_gross_sales ?? 0) : (rangeBreakdown?.current_gross_sales ?? 0);
-  const totalOrders = isAll ? (allBreakdown?.orders_total_count ?? 0) : (rangeBreakdown?.orders_total_count ?? 0);
-  const totalCustomers = isAll ? (allBreakdown?.customers_count ?? 0) : (rangeBreakdown?.customers_count ?? 0);
-  const recentOrders = isAll ? recentOrdersAll : recentFiltered;
-
-  const loadingRevenueTotal = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
-  const loadingOrdersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
-  const loadingCustomersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
-  const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
-
-  const loadingShopifySalesBreakdown = isAll ? loadingAllShopifySalesBreakdown : loadingRangeShopifySalesBreakdown;
-  const shopifySalesBreakdown = isAll ? allShopifySalesBreakdown : rangeShopifySalesBreakdown;
+  const shopifySalesBreakdown = useMemo(
+    () => shopifyAnalyticsToSalesBreakdown(analytics ?? emptyShopifyAnalyticsDashboard()),
+    [analytics],
+  );
+  const netSales = shopifySalesBreakdown?.net_sales_derived ?? 0;
 
   const chartData = useMemo(
     () => chartSeries.map((p) => ({ label: p.label, revenue: p.revenue, orders: p.orders })),
@@ -115,14 +93,86 @@ export default function DashboardPage() {
 
   const loadingChart = loadingSeries;
 
-  const prevCurrentGross = metricsCompare?.current_gross_sales ?? 0;
-  const revDelta =
-    !isAll && prevCurrentGross > 0 ? (((currentGross - prevCurrentGross) / prevCurrentGross) * 100).toFixed(1) : null;
-
   const firstName = user?.name?.split(" ")[0] || "there";
+  const displayName = user?.name?.trim() || firstName;
 
   return (
-    <div className="space-y-6 w-full text-center sm:text-left">
+    <>
+      <div className="fixed top-[max(1rem,env(safe-area-inset-top,0px))] right-[4.25rem] z-50 lg:hidden w-auto max-w-[calc(100vw-8.5rem)]">
+        <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
+          <SelectTrigger className="rounded-xl h-10 w-auto min-w-[6.75rem] max-w-[9.5rem] font-body bg-card/95 backdrop-blur-sm border shadow-sm px-3">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <PeriodSelectItems />
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="lg:hidden salesperson-mobile-hero-shell mb-1 text-center">
+        <div className="flex flex-col items-center gap-2 mb-6">
+          <div className="h-11 w-11 rounded-full bg-primary-foreground/15 ring-1 ring-primary-foreground/25 flex items-center justify-center shrink-0">
+            <span className="text-primary-foreground text-sm font-heading font-bold">{user?.initials}</span>
+          </div>
+          <p className="text-lg font-heading font-bold leading-tight">{displayName}</p>
+        </div>
+
+        <p className="text-sm font-body font-medium text-primary-foreground/90">Net sales</p>
+        {loadingAnalytics ? (
+          <Skeleton className="h-12 w-52 max-w-full mx-auto mt-2 rounded-xl bg-primary-foreground/20" />
+        ) : (
+          <p className="text-[2.5rem] leading-tight font-heading font-bold tabular-nums mt-1 tracking-tight">
+            {formatOrderMoney(netSales, null, currency)}
+          </p>
+        )}
+        <p className="text-xs font-body text-primary-foreground/75 mt-1.5">{trendLabel}</p>
+
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
+          <Button
+            asChild
+            variant="ghost"
+            className="h-10 w-auto rounded-full px-4 bg-card text-foreground font-heading font-semibold text-sm shadow-sm border-0 transition-all duration-200 hover:bg-white hover:text-foreground hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.97] tap-scale"
+          >
+            <Link to="/customers">
+              <Users className="h-4 w-4 shrink-0" aria-hidden />
+              Customers
+            </Link>
+          </Button>
+          <Button
+            asChild
+            variant="ghost"
+            className="h-10 w-auto rounded-full px-4 bg-card text-foreground font-heading font-semibold text-sm shadow-sm border-0 transition-all duration-200 hover:bg-white hover:text-foreground hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.97] tap-scale"
+          >
+            <Link to="/orders">
+              <ShoppingCart className="h-4 w-4 shrink-0" aria-hidden />
+              Orders
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+    <div className="space-y-6 w-full px-4 lg:px-0 text-center sm:text-left">
+
+      {preset === "custom" && (
+        <div className="lg:hidden flex flex-col gap-2 card-float p-4 opacity-0 animate-fade-in">
+          <p className="text-xs font-medium text-muted-foreground font-body">Custom range</p>
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="h-10 rounded-xl border bg-card px-3 text-sm font-body flex-1 min-w-0"
+            />
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="h-10 rounded-xl border bg-card px-3 text-sm font-body flex-1 min-w-0"
+            />
+          </div>
+        </div>
+      )}
+
       {!user?.hasDbRole && (
         <Alert className="rounded-xl border-warning/40 bg-warning/5 text-left opacity-0 animate-fade-in">
           <AlertCircle className="h-4 w-4 text-warning" />
@@ -136,7 +186,7 @@ export default function DashboardPage() {
         </Alert>
       )}
 
-      <div className="flex flex-col items-center sm:items-start opacity-0 animate-fade-in">
+      <div className="hidden lg:flex flex-col items-center sm:items-start opacity-0 animate-fade-in">
         <div className="h-14 w-14 rounded-2xl gradient-primary flex items-center justify-center mb-3 shadow-md sm:hidden">
           <span className="text-primary-foreground text-lg font-heading font-bold">{user?.initials}</span>
         </div>
@@ -152,7 +202,7 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      <div className="card-float p-4 opacity-0 animate-fade-in flex flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
+      <div className="hidden lg:flex card-float p-4 opacity-0 animate-fade-in flex-col sm:flex-row flex-wrap gap-3 items-stretch sm:items-end">
         <div className="flex-1 min-w-[160px]">
           <p className="text-xs font-medium text-muted-foreground font-body mb-1.5">Period</p>
           <Select value={preset} onValueChange={(v) => setPreset(v as DatePreset)}>
@@ -180,44 +230,23 @@ export default function DashboardPage() {
             />
           </div>
         )}
-        {!isAll && (
-          <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
-            Compared to previous equivalent period
-            {revDelta != null ? ` · Total sales (orders) ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
-          </p>
-        )}
       </div>
 
-      <div className="space-y-3">
-        <ShopifySalesBreakdownSection
-          breakdown={shopifySalesBreakdown}
-          loading={loadingShopifySalesBreakdown}
-          currency={currency}
-          delayBase={50}
-        />
-        <RetailFinancialKpiSection
-          metrics={isAll ? allBreakdown : rangeBreakdown}
-          loading={loadingRevenueTotal}
-          currency={currency}
-          delayBase={100}
-        />
-        <div className="grid grid-cols-2 lg:grid-cols-2 gap-3 lg:gap-4">
-          <KpiCard
-            title="Orders"
-            value={loadingOrdersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalOrders.toString()}
-            icon={ShoppingCart}
-            info="Count of all non-test orders in your scope and selected period."
-            delay={200}
-          />
-          <KpiCard
-            title="Registered Customers"
-            value={loadingCustomersCount ? <Skeleton className="h-8 w-16 rounded-md" /> : totalCustomers.toString()}
-            icon={Users}
-            info="Registered customers in your scope, filtered by customer created date for the selected period."
-            delay={250}
-          />
-        </div>
-      </div>
+      <DashboardOverviewSummaryCard
+        currency={currency}
+        delayBase={50}
+        salesBreakdown={shopifySalesBreakdown}
+        loadingSales={loadingAnalytics}
+        totalOrders={totalOrders}
+        paidOrders={paidOrders}
+        pendingOrders={pendingOrders}
+        refundedOrders={refundedOrders}
+        unfulfilledOrders={unfulfilledOrders}
+        loadingOrders={loadingAnalytics}
+        loadingUnfulfilled={loadingAnalytics}
+        totalCustomers={totalCustomers}
+        loadingCustomers={loadingAnalytics}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
         {loadingChart ? (
@@ -427,5 +456,6 @@ export default function DashboardPage() {
         )}
       </div>
     </div>
+    </>
   );
 }

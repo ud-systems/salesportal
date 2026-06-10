@@ -25,7 +25,7 @@ import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
-import { getDashboardRange, toLocalYmd, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -63,8 +63,8 @@ export default function CustomersPage() {
   const [expandedOrderId, setExpandedOrderId] = useState("");
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
-  const fromYmd = toLocalYmd(range.from);
-  const toYmd = toLocalYmd(range.to);
+  const rangeFromIso = toRangeIso(range.from);
+  const rangeToIso = toRangeIso(range.to);
   const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, "customers-page");
   const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, "customers-page");
   const { data: managerTeamOptions = [] } = useManagerTeamMemberOptions(user?.id, "customers-page");
@@ -263,8 +263,8 @@ export default function CustomersPage() {
     cityFilter,
     assignmentFilter: assignmentFilter as "all" | "assigned" | "unassigned",
     rfmGroupFilter,
-    fromDate: fromYmd,
-    toDate: toYmd,
+    fromIso: rangeFromIso,
+    toIso: rangeToIso,
     sortBy,
     sortDir,
     scopeSalespersonIds: shouldApplyExplicitScopeFilters ? finalScopedSalespersonIds : undefined,

@@ -17,6 +17,11 @@ import {
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
 import { SHOPIFY_ORDER_DETAIL_GQL, upsertShopifyOrderFromGraphqlNode } from "../_shared/shopify-order-graphql-upsert.ts";
+import { syncRefundEventsFromWebhookPayload } from "../_shared/shopify-refund-events.ts";
+import {
+  dubaiRecentPeriodFactDays,
+  syncShopifyAnalyticsPeriodFactsForDays,
+} from "../_shared/shopify-analytics-facts-sync.ts";
 import { sendWebPushToUserIds } from "../_shared/web-push.ts";
 
 type SalespersonRow = { user_id: string; salesperson_name: string | null };
@@ -309,6 +314,20 @@ Deno.serve(async (req) => {
         .eq("webhook_id", webhookId);
     };
 
+    /** Re-pull ShopifyQL daily totals for the last 7 Dubai days (covers Today through Last 7 days filters). */
+    const refreshAnalyticsPeriodFacts = async () => {
+      try {
+        await syncShopifyAnalyticsPeriodFactsForDays(
+          supabase,
+          shopDomain,
+          adminToken,
+          dubaiRecentPeriodFactDays(),
+        );
+      } catch (analyticsErr) {
+        devError("shopify-webhook analytics period facts refresh:", analyticsErr);
+      }
+    };
+
     const upsertCustomerByGid = async (customerGid: string) => {
       const { data } = await buildShopifyQuery(
         shopDomain,
@@ -396,7 +415,10 @@ Deno.serve(async (req) => {
       return row?.id || null;
     };
 
-    const upsertOrderByGid = async (orderGid: string) => {
+    const upsertOrderByGid = async (
+      orderGid: string,
+      webhookPayload?: Record<string, unknown>,
+    ) => {
       const { data } = await buildShopifyQuery(shopDomain, adminToken, SHOPIFY_ORDER_DETAIL_GQL, { id: orderGid });
       const resolveCustomer = async (customerGid: string | null) => {
         if (!customerGid) return null;
@@ -409,11 +431,23 @@ Deno.serve(async (req) => {
         if (customerRow?.id) return customerRow.id;
         return await upsertCustomerByGid(customerGid);
       };
+      const restDiscountsRaw = webhookPayload?.total_discounts;
+      const restDiscounts =
+        restDiscountsRaw != null && String(restDiscountsRaw).trim() !== ""
+          ? parseFloat(String(restDiscountsRaw))
+          : null;
       const row = await upsertShopifyOrderFromGraphqlNode(
         supabase,
         data?.order as Record<string, unknown> | undefined,
         resolveCustomer,
+        {
+          reportingOriginalTotalDiscountsOverride:
+            restDiscounts != null && Number.isFinite(restDiscounts) ? restDiscounts : null,
+        },
       );
+      if (row?.orderId && webhookPayload) {
+        await syncRefundEventsFromWebhookPayload(supabase, row.orderId, webhookPayload);
+      }
       return row?.orderId ?? null;
     };
 
@@ -632,15 +666,17 @@ Deno.serve(async (req) => {
       } else if (topic === "orders/create" || topic === "orders/updated") {
         const orderGid = String(payload.admin_graphql_api_id || "");
         if (orderGid) {
-          const orderId = await upsertOrderByGid(orderGid);
+          const orderId = await upsertOrderByGid(orderGid, payload);
           if (topic === "orders/create" && orderId) {
             await notifyUsersForNewOrder(orderId);
           }
+          await refreshAnalyticsPeriodFacts();
         } else await markDone("ignored", "order webhook missing admin_graphql_api_id");
       } else if (topic === "fulfillments/create" || topic === "fulfillments/update") {
         const orderGid = extractOrderGidFromFulfillmentPayload(payload);
         if (orderGid) {
           await upsertOrderByGid(orderGid);
+          await refreshAnalyticsPeriodFacts();
         } else {
           await markDone("ignored", "fulfillment webhook missing order_id");
         }

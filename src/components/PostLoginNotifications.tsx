@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUnreadNotifications, useMarkNotificationsRead } from "@/hooks/use-notifications";
 import {
@@ -12,36 +13,64 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatDisplayDateTime } from "@/lib/format";
 
-const SESSION_KEY = "uddash_notifications_dialog_seen";
+const SESSION_OPENED_KEY = "uddash_notifications_dialog_opened";
 
 export function PostLoginNotifications() {
   const { user, loading } = useAuth();
   const { data: unread = [], isSuccess } = useUnreadNotifications(25);
   const markRead = useMarkNotificationsRead();
   const [open, setOpen] = useState(false);
+  const [greetedForUser, setGreetedForUser] = useState<string | null>(null);
+  const dismissingRef = useRef(false);
 
   useEffect(() => {
-    if (loading || !user?.hasDbRole) return;
+    setGreetedForUser(null);
+  }, [user?.id]);
+
+  // Show the backlog dialog once per browser session on login — not on every new realtime order.
+  useEffect(() => {
+    if (loading || !user?.hasDbRole || !user.id) return;
     if (!isSuccess || unread.length === 0) return;
-    const sessionId = `${user.id}:${unread.map((n) => n.id).join(",")}`;
-    const last = sessionStorage.getItem(SESSION_KEY);
-    if (last === sessionId) return;
+    if (greetedForUser === user.id) return;
+
+    const sessionFlag = sessionStorage.getItem(`${SESSION_OPENED_KEY}:${user.id}`);
+    if (sessionFlag === "1") {
+      setGreetedForUser(user.id);
+      return;
+    }
+
+    setGreetedForUser(user.id);
+    sessionStorage.setItem(`${SESSION_OPENED_KEY}:${user.id}`, "1");
     setOpen(true);
-  }, [loading, user?.id, user?.hasDbRole, isSuccess, unread]);
+  }, [loading, user?.id, user?.hasDbRole, isSuccess, unread.length, greetedForUser]);
 
   const handleDismiss = async (markAsRead: boolean) => {
-    const sessionId = `${user?.id}:${unread.map((n) => n.id).join(",")}`;
-    sessionStorage.setItem(SESSION_KEY, sessionId);
-    if (markAsRead && unread.length) {
-      await markRead.mutateAsync(unread.map((n) => n.id));
+    if (dismissingRef.current) return;
+    dismissingRef.current = true;
+    try {
+      if (markAsRead && unread.length) {
+        try {
+          await markRead.mutateAsync(unread.map((n) => n.id));
+        } catch {
+          toast.error("Could not mark notifications as read. Please try again.");
+          return;
+        }
+      }
+      setOpen(false);
+    } finally {
+      dismissingRef.current = false;
     }
-    setOpen(false);
   };
 
   if (!user?.hasDbRole) return null;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && void handleDismiss(false)}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v && !dismissingRef.current) void handleDismiss(false);
+      }}
+    >
       <DialogContent className="sm:max-w-md p-0 gap-0 overflow-hidden rounded-2xl">
         <DialogHeader className="p-4 pb-2 pr-12 space-y-1 relative">
           <DialogTitle className="font-heading text-left">New activity</DialogTitle>

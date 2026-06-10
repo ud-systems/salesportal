@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatDisplayDate, formatOrderMoney, formatOrderShippingAddress } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getDashboardRange, toLocalYmd, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
 import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -36,18 +36,15 @@ export default function SalespersonsPage() {
     () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
     [preset, customFrom, customTo],
   );
-  const isAll = preset === "all";
   const fromIso = toRangeIso(range.from);
   const toIso = toRangeIso(range.to);
-  const fromYmd = toLocalYmd(range.from);
-  const toYmd = toLocalYmd(range.to);
   const [selectedSalesperson, setSelectedSalesperson] = useState<{ id: string; name: string } | null>(null);
   const leaderRole: "manager" | "supervisor" | null = isSupervisor ? "supervisor" : isManager ? "manager" : null;
   const leaderUserId = leaderRole ? user?.id ?? null : null;
   const { data: salespersons = [], isLoading } = useSalespersonFinancialBreakdown(
     "salespersons-page",
-    isAll ? null : fromIso,
-    isAll ? null : toIso,
+    fromIso,
+    toIso,
     leaderUserId,
     leaderRole,
   );
@@ -61,8 +58,7 @@ export default function SalespersonsPage() {
         orders: Number(sp.orders_total_count || 0),
         paidOrders: Number(sp.orders_paid_count || 0),
         refundedOrders: Number(sp.orders_refunded_count || 0),
-        originalGross: Number(sp.original_gross_sales || 0),
-        currentGross: Number(sp.current_gross_sales || 0),
+        totalSales: Number(sp.current_gross_sales || 0),
         netExVat: Number(sp.net_sales_ex_vat || 0),
         vatCollected: Number(sp.vat_collected || 0),
         refundedReturned: Number(sp.refunded_returned_value || 0),
@@ -87,11 +83,10 @@ export default function SalespersonsPage() {
       "Orders",
       "Paid",
       "Refunded orders",
-      `Original gross (${storeCurrency})`,
-      `Current gross (${storeCurrency})`,
-      `Net sales ex VAT (${storeCurrency})`,
-      `VAT collected (${storeCurrency})`,
-      `Refunded / returned (${storeCurrency})`,
+      `Total sales (${storeCurrency})`,
+      `Net sales (${storeCurrency})`,
+      `Taxes (${storeCurrency})`,
+      `Returns (${storeCurrency})`,
     ],
     [storeCurrency],
   );
@@ -109,8 +104,7 @@ export default function SalespersonsPage() {
         sp.orders,
         sp.paidOrders,
         sp.refundedOrders,
-        Number(sp.originalGross.toFixed(2)),
-        Number(sp.currentGross.toFixed(2)),
+        Number(sp.totalSales.toFixed(2)),
         Number(sp.netExVat.toFixed(2)),
         Number(sp.vatCollected.toFixed(2)),
         Number(sp.refundedReturned.toFixed(2)),
@@ -152,8 +146,7 @@ export default function SalespersonsPage() {
         sp.orders,
         sp.paidOrders,
         sp.refundedOrders,
-        formatOrderMoney(sp.originalGross, null, storeCurrency),
-        formatOrderMoney(sp.currentGross, null, storeCurrency),
+        formatOrderMoney(sp.totalSales, null, storeCurrency),
         formatOrderMoney(sp.netExVat, null, storeCurrency),
         formatOrderMoney(sp.vatCollected, null, storeCurrency),
         formatOrderMoney(sp.refundedReturned, null, storeCurrency),
@@ -181,8 +174,8 @@ export default function SalespersonsPage() {
   const { data: selectedCustomersData, isLoading: loadingSelectedCustomers } = useCustomersPaginated({
     page: 1,
     pageSize: 8,
-    fromDate: fromYmd,
-    toDate: toYmd,
+    fromIso,
+    toIso,
     scopeSalespersonIds: selectedSalespersonId ? [selectedSalespersonId] : [],
     forceScopedFilter: true,
     enabled: Boolean(selectedSalespersonId),
@@ -190,8 +183,8 @@ export default function SalespersonsPage() {
   const { data: selectedOrdersData, isLoading: loadingSelectedOrders } = useOrdersPaginated({
     page: 1,
     pageSize: 8,
-    fromDate: fromYmd,
-    toDate: toYmd,
+    fromIso,
+    toIso,
     sortBy: "shopify_created_at",
     sortDir: "desc",
     scopeSalespersonIds: selectedSalespersonId ? [selectedSalespersonId] : [],
@@ -301,11 +294,10 @@ export default function SalespersonsPage() {
                     <th className="text-right py-2.5 font-medium">Orders</th>
                     <th className="text-right py-2.5 font-medium">Paid</th>
                     <th className="text-right py-2.5 font-medium">Refunded</th>
-                    <th className="text-right py-2.5 font-medium">Original gross</th>
-                    <th className="text-right py-2.5 font-medium">Current gross</th>
-                    <th className="text-right py-2.5 font-medium">Net ex VAT</th>
-                    <th className="text-right py-2.5 font-medium">VAT</th>
-                    <th className="text-right py-2.5 font-medium">Refunded / ret.</th>
+                    <th className="text-right py-2.5 font-medium">Total sales</th>
+                    <th className="text-right py-2.5 font-medium">Net sales</th>
+                    <th className="text-right py-2.5 font-medium">Taxes</th>
+                    <th className="text-right py-2.5 font-medium">Returns</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -328,8 +320,7 @@ export default function SalespersonsPage() {
                       <td className="py-3 text-right font-medium text-foreground">{sp.orders}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.paidOrders}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.refundedOrders}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.originalGross), null, storeCurrency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.currentGross), null, storeCurrency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.totalSales), null, storeCurrency)}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.netExVat), null, storeCurrency)}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.vatCollected), null, storeCurrency)}</td>
                       <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(Number(sp.refundedReturned), null, storeCurrency)}</td>
@@ -369,15 +360,14 @@ export default function SalespersonsPage() {
                   </div>
                   <div className="flex-1 p-3 rounded-xl bg-muted/50 text-center">
                     <PoundSterling className="h-4 w-4 text-primary mx-auto mb-1" />
-                    <p className="text-lg font-heading font-bold text-foreground">{formatOrderMoney(Number(sp.currentGross), null, storeCurrency)}</p>
-                    <p className="text-[10px] text-muted-foreground font-body">Current gross sales</p>
+                    <p className="text-lg font-heading font-bold text-foreground">{formatOrderMoney(Number(sp.totalSales), null, storeCurrency)}</p>
+                    <p className="text-[10px] text-muted-foreground font-body">Total sales</p>
                   </div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-body">
-                  <span>Original gross: {formatOrderMoney(Number(sp.originalGross), null, storeCurrency)}</span>
-                  <span>Net ex VAT: {formatOrderMoney(Number(sp.netExVat), null, storeCurrency)}</span>
-                  <span>VAT: {formatOrderMoney(Number(sp.vatCollected), null, storeCurrency)}</span>
-                  <span>Refunded / returned: {formatOrderMoney(Number(sp.refundedReturned), null, storeCurrency)}</span>
+                  <span>Net sales: {formatOrderMoney(Number(sp.netExVat), null, storeCurrency)}</span>
+                  <span>Taxes: {formatOrderMoney(Number(sp.vatCollected), null, storeCurrency)}</span>
+                  <span>Returns: {formatOrderMoney(Number(sp.refundedReturned), null, storeCurrency)}</span>
                 </div>
               </div>
             ))}

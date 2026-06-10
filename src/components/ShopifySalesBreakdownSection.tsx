@@ -46,14 +46,14 @@ export function ShopifySalesBreakdownSection({
           value={loading ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(gross, null, currency)}
           icon={Package}
           delay={delayBase + 40}
-          info="Sum of reporting_line_items_gross per order, else subtotal as fallback. Approximates pre-discount merchandise using original line prices from Shopify."
+          info="Shopify Analytics gross sales for the period (ShopifyQL sales event day). Falls back to order subtotals when period facts are not synced."
         />
         <KpiCard
           title="Discounts"
           value={loading ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(disc, null, currency)}
           icon={Percent}
           delay={delayBase + 80}
-          info="Sum of Shopify Order.currentTotalDiscountsSet (shop money) at last sync."
+          info="Shopify Analytics discounts for the period (includes adjustments on orders placed on earlier days)."
         />
         <KpiCard
           title="Returns / refunded"
@@ -67,7 +67,7 @@ export function ShopifySalesBreakdownSection({
           value={loading ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(net, null, currency)}
           icon={Calculator}
           delay={delayBase + 160}
-          info="gross_sales_line_list − discounts − returns_refunded (CRM definition from Layer 2 fields)."
+          info="Shopify Analytics net merchandise sales for the period."
         />
         <KpiCard
           title="Shipping"
@@ -81,14 +81,14 @@ export function ShopifySalesBreakdownSection({
           value={loading ? <Skeleton className="h-8 w-24 rounded-md" /> : formatOrderMoney(tax, null, currency)}
           icon={Receipt}
           delay={delayBase + 240}
-          info="Sum of total_tax on scoped orders (same tax field as retail KPIs)."
+          info="Shopify Analytics taxes for the period (from ShopifyQL, not a flat 20% estimate)."
         />
         <KpiCard
           title="Total sales (check)"
           value={loading ? <Skeleton className="h-8 w-28 rounded-md" /> : formatOrderMoney(totalCheck, null, currency)}
           icon={CircleDollarSign}
           delay={delayBase + 280}
-          info="net_sales_derived + taxes + shipping — sanity check against paid totals when Layer 2 is fully backfilled."
+          info="Shopify Analytics total sales for the period (net + taxes + shipping − return fees)."
         />
       </div>
     </div>

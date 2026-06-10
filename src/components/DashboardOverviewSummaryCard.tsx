@@ -96,6 +96,7 @@ export type DashboardOverviewSummaryCardProps = {
   loadingSales: boolean;
   totalOrders: number;
   paidOrders: number;
+  pendingOrders: number;
   refundedOrders: number;
   unfulfilledOrders: number;
   loadingOrders: boolean;
@@ -103,6 +104,7 @@ export type DashboardOverviewSummaryCardProps = {
   totalCustomers: number;
   loadingCustomers: boolean;
   unfulfilledHref?: string;
+  pendingHref?: string;
 };
 
 export function DashboardOverviewSummaryCard({
@@ -112,6 +114,7 @@ export function DashboardOverviewSummaryCard({
   loadingSales,
   totalOrders,
   paidOrders,
+  pendingOrders,
   refundedOrders,
   unfulfilledOrders,
   loadingOrders,
@@ -119,20 +122,22 @@ export function DashboardOverviewSummaryCard({
   totalCustomers,
   loadingCustomers,
   unfulfilledHref = "/orders?fulfillment=unfulfilled",
+  pendingHref = "/orders?status=pending",
 }: DashboardOverviewSummaryCardProps) {
   const gross = salesBreakdown?.gross_sales_line_list ?? 0;
   const disc = salesBreakdown?.discounts ?? 0;
   const refunded = salesBreakdown?.returns_refunded ?? 0;
   const net = salesBreakdown?.net_sales_derived ?? 0;
   const ship = salesBreakdown?.shipping ?? 0;
+  const returnFees = salesBreakdown?.return_fees ?? 0;
   const tax = salesBreakdown?.taxes ?? 0;
   const totalCheck = salesBreakdown?.total_sales_check ?? 0;
   const missing = salesBreakdown?.orders_missing_reporting ?? 0;
 
   const ordersInfo =
-    "Order counts for the selected period: all orders, paid or partially paid, financial status refunded/partially_refunded/voided, and line items not yet fulfilled.";
+    "Order counts for the selected period by financial status (paid, pending/authorized, refunded/voided) plus fulfillment (unfulfilled is separate — an order can be paid and unfulfilled).";
   const salesInfo =
-    "Shopify Analytics–style components from synced reporting fields. Gross sales is line-list merchandise; total sales adds tax and shipping.";
+    "Shopify Analytics Total sales breakdown (sales event day, Asia/Dubai). Refreshed from ShopifyQL on each order webhook and during scheduled sync. Includes discounts and gross on older orders when Shopify attributes them to this period.";
   const customersInfo = "Scoped registered customers in the selected period (customer created-at filter).";
 
   return (
@@ -145,8 +150,8 @@ export function DashboardOverviewSummaryCard({
           <AlertTriangle className="h-4 w-4 text-amber-600" />
           <AlertTitle className="font-heading text-foreground">Incomplete Layer 2 data</AlertTitle>
           <AlertDescription>
-            {missing.toLocaleString()} order{missing === 1 ? "" : "s"} still missing reporting columns — run orders sync to
-            backfill.
+            {missing.toLocaleString()} order{missing === 1 ? "" : "s"} missing subtotal or line gross — totals may drift until
+            webhook re-processes those orders.
           </AlertDescription>
         </Alert>
       )}
@@ -162,6 +167,7 @@ export function DashboardOverviewSummaryCard({
           <SummaryRow label="Returns" loading={loadingSales} value={formatDeduction(refunded, currency)} />
           <SummaryRow label="Net sales" loading={loadingSales} value={formatOrderMoney(net, null, currency)} />
           <SummaryRow label="Shipping charges" loading={loadingSales} value={formatOrderMoney(ship, null, currency)} />
+          <SummaryRow label="Return fees" loading={loadingSales} value={formatDeduction(returnFees, currency)} />
           <SummaryRow label="Taxes" loading={loadingSales} value={formatOrderMoney(tax, null, currency)} />
           <SummaryRow
             label="Total sales"
@@ -174,6 +180,19 @@ export function DashboardOverviewSummaryCard({
         <SummaryColumn title="Orders" info={ordersInfo} className="lg:px-6">
           <SummaryRow label="Total" loading={loadingOrders} value={totalOrders.toLocaleString()} />
           <SummaryRow label="Paid" loading={loadingOrders} value={paidOrders.toLocaleString()} />
+          <SummaryRow
+            label="Pending"
+            loading={loadingOrders}
+            value={
+              loadingOrders ? (
+                "—"
+              ) : (
+                <Link to={pendingHref} className="text-primary underline-offset-2 hover:underline">
+                  {pendingOrders.toLocaleString()}
+                </Link>
+              )
+            }
+          />
           <SummaryRow label="Refunded" loading={loadingOrders} value={refundedOrders.toLocaleString()} />
           <SummaryRow
             label="Unfulfilled"

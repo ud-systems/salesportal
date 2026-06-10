@@ -2,6 +2,12 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";
 import { devError, devInfo } from "@/lib/dev-logger";
+import {
+  storeDayEndExclusiveIsoFromYmd,
+  storeDayStartIsoFromYmd,
+  storeTimeseriesBucket,
+  SHOPIFY_REPORTING_TIMEZONE,
+} from "@/lib/shopify-reporting-timezone";
 import { useQuery } from "@tanstack/react-query";
 
 export type SalespersonPerformanceRow = {
@@ -53,6 +59,7 @@ export type ScopeShopifySalesBreakdown = {
   returns_refunded: number;
   net_sales_derived: number;
   shipping: number;
+  return_fees: number;
   taxes: number;
   total_sales_check: number;
   orders_in_scope: number;
@@ -67,6 +74,7 @@ export function emptyScopeShopifySalesBreakdown(): ScopeShopifySalesBreakdown {
     returns_refunded: 0,
     net_sales_derived: 0,
     shipping: 0,
+    return_fees: 0,
     taxes: 0,
     total_sales_check: 0,
     orders_in_scope: 0,
@@ -81,11 +89,210 @@ function mapScopeShopifySalesBreakdownRow(row: Partial<ScopeShopifySalesBreakdow
     returns_refunded: Number(row?.returns_refunded ?? 0),
     net_sales_derived: Number(row?.net_sales_derived ?? 0),
     shipping: Number(row?.shipping ?? 0),
+    return_fees: Number(row?.return_fees ?? 0),
     taxes: Number(row?.taxes ?? 0),
     total_sales_check: Number(row?.total_sales_check ?? 0),
     orders_in_scope: Number(row?.orders_in_scope ?? 0),
     orders_missing_reporting: Number(row?.orders_missing_reporting ?? 0),
   };
+}
+
+/** Unified Shopify Analytics dashboard row (get_scope_shopify_analytics_dashboard). */
+export type ShopifyAnalyticsDashboard = {
+  gross_sales: number;
+  discounts: number;
+  returns: number;
+  net_sales: number;
+  shipping_charges: number;
+  return_fees: number;
+  taxes: number;
+  total_sales: number;
+  orders_total: number;
+  orders_paid: number;
+  orders_pending: number;
+  orders_refunded: number;
+  orders_unfulfilled: number;
+  customers_count: number;
+  average_order_value: number;
+  orders_missing_reporting: number;
+};
+
+export function emptyShopifyAnalyticsDashboard(): ShopifyAnalyticsDashboard {
+  return {
+    gross_sales: 0,
+    discounts: 0,
+    returns: 0,
+    net_sales: 0,
+    shipping_charges: 0,
+    return_fees: 0,
+    taxes: 0,
+    total_sales: 0,
+    orders_total: 0,
+    orders_paid: 0,
+    orders_pending: 0,
+    orders_refunded: 0,
+    orders_unfulfilled: 0,
+    customers_count: 0,
+    average_order_value: 0,
+    orders_missing_reporting: 0,
+  };
+}
+
+function mapShopifyAnalyticsDashboardRow(
+  row: Partial<ShopifyAnalyticsDashboard> | undefined | null,
+): ShopifyAnalyticsDashboard {
+  return {
+    gross_sales: Number(row?.gross_sales ?? 0),
+    discounts: Number(row?.discounts ?? 0),
+    returns: Number(row?.returns ?? 0),
+    net_sales: Number(row?.net_sales ?? 0),
+    shipping_charges: Number(row?.shipping_charges ?? 0),
+    return_fees: Number(row?.return_fees ?? 0),
+    taxes: Number(row?.taxes ?? 0),
+    total_sales: Number(row?.total_sales ?? 0),
+    orders_total: Number(row?.orders_total ?? 0),
+    orders_paid: Number(row?.orders_paid ?? 0),
+    orders_pending: Number(row?.orders_pending ?? 0),
+    orders_refunded: Number(row?.orders_refunded ?? 0),
+    orders_unfulfilled: Number(row?.orders_unfulfilled ?? 0),
+    customers_count: Number(row?.customers_count ?? 0),
+    average_order_value: Number(row?.average_order_value ?? 0),
+    orders_missing_reporting: Number(row?.orders_missing_reporting ?? 0),
+  };
+}
+
+/** Map unified dashboard row to legacy breakdown shape for DashboardOverviewSummaryCard. */
+export function shopifyAnalyticsToSalesBreakdown(d: ShopifyAnalyticsDashboard): ScopeShopifySalesBreakdown {
+  return {
+    gross_sales_line_list: d.gross_sales,
+    discounts: d.discounts,
+    returns_refunded: d.returns,
+    net_sales_derived: d.net_sales,
+    shipping: d.shipping_charges,
+    return_fees: d.return_fees,
+    taxes: d.taxes,
+    total_sales_check: d.total_sales,
+    orders_in_scope: d.orders_total,
+    orders_missing_reporting: d.orders_missing_reporting,
+  };
+}
+
+export function useShopifyAnalyticsDashboard(
+  viewerUserId: string | undefined,
+  fromIso?: string | null,
+  toIso?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["shopify-analytics-dashboard", viewerUserId ?? "none", fromIso ?? "all", toIso ?? "all"],
+    queryFn: async () => {
+      if (!viewerUserId) return emptyShopifyAnalyticsDashboard();
+      const { data, error } = await (supabase as any).rpc("get_scope_shopify_analytics_dashboard", {
+        _viewer_user_id: viewerUserId,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      return mapShopifyAnalyticsDashboardRow(data?.[0]);
+    },
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    refetchOnWindowFocus: true,
+    enabled: enabled && Boolean(viewerUserId),
+  });
+}
+
+/** Aggregate Shopify Analytics for multiple viewer scopes (supervisor manager-team rollups). */
+export function useAggregateShopifyAnalyticsDashboardForViewers(
+  viewerUserIds: string[],
+  fromIso?: string | null,
+  toIso?: string | null,
+  scopeKey = "global",
+  enabled = true,
+) {
+  const idsKey = [...viewerUserIds].sort().join(",");
+  return useQuery({
+    queryKey: [
+      "aggregate-shopify-analytics-dashboard-for-viewers",
+      scopeKey,
+      idsKey,
+      fromIso ?? "all",
+      toIso ?? "all",
+    ],
+    queryFn: async () => {
+      if (!viewerUserIds.length) return emptyShopifyAnalyticsDashboard();
+      const [bdRes, finRes] = await Promise.all([
+        supabase.rpc("get_scope_shopify_sales_breakdown_for_viewers", {
+          _viewer_user_ids: viewerUserIds,
+          _from_iso: fromIso ?? null,
+          _to_iso: toIso ?? null,
+        }),
+        (supabase as any).rpc("get_scope_financial_breakdown_for_viewers", {
+          _viewer_user_ids: viewerUserIds,
+          _from_iso: fromIso ?? null,
+          _to_iso: toIso ?? null,
+        }),
+      ]);
+      if (bdRes.error) throw bdRes.error;
+      if (finRes.error) throw finRes.error;
+      const bd = mapScopeShopifySalesBreakdownRow(bdRes.data?.[0]);
+      const fin = finRes.data?.[0] as Partial<ScopeFinancialBreakdown> | undefined;
+      const ordersTotal = Number(bd.orders_in_scope ?? 0);
+      const totalSales = Number(bd.total_sales_check ?? 0);
+      return mapShopifyAnalyticsDashboardRow({
+        gross_sales: bd.gross_sales_line_list,
+        discounts: bd.discounts,
+        returns: bd.returns_refunded,
+        net_sales: bd.net_sales_derived,
+        shipping_charges: bd.shipping,
+        return_fees: bd.return_fees,
+        taxes: bd.taxes,
+        total_sales: totalSales,
+        orders_total: ordersTotal,
+        orders_paid: fin?.orders_paid_count,
+        orders_pending: fin?.orders_pending_count,
+        orders_refunded: fin?.orders_refunded_count,
+        orders_unfulfilled: 0,
+        customers_count: fin?.customers_count,
+        average_order_value: ordersTotal > 0 ? totalSales / ordersTotal : 0,
+        orders_missing_reporting: bd.orders_missing_reporting,
+      });
+    },
+    staleTime: 60_000,
+    enabled: enabled && viewerUserIds.length > 0,
+  });
+}
+
+export function useSelectedSalespeopleShopifyAnalyticsDashboard(
+  viewerUserId: string | undefined,
+  salespersonUserIds: string[],
+  fromIso?: string | null,
+  toIso?: string | null,
+  enabled = true,
+) {
+  const idsKey = [...salespersonUserIds].sort().join(",");
+  return useQuery({
+    queryKey: [
+      "selected-salespeople-shopify-analytics-dashboard",
+      viewerUserId ?? "none",
+      idsKey,
+      fromIso ?? "all",
+      toIso ?? "all",
+    ],
+    queryFn: async () => {
+      if (!viewerUserId || !salespersonUserIds.length) return emptyShopifyAnalyticsDashboard();
+      const { data, error } = await (supabase as any).rpc("get_selected_salespeople_shopify_analytics_dashboard", {
+        _viewer_user_id: viewerUserId,
+        _salesperson_user_ids: salespersonUserIds,
+        _from_iso: fromIso ?? null,
+        _to_iso: toIso ?? null,
+      });
+      if (error) throw error;
+      return mapShopifyAnalyticsDashboardRow(data?.[0]);
+    },
+    staleTime: 60_000,
+    enabled: enabled && Boolean(viewerUserId) && salespersonUserIds.length > 0,
+  });
 }
 
 export type AnalyticsOverviewKpis = {
@@ -893,18 +1100,28 @@ function splitIntoChunks<T>(values: T[], chunkSize: number): T[][] {
   return out;
 }
 
-function toUtcIsoAtLocalDayStart(ymd?: string | null): string | null {
-  if (!ymd) return null;
-  const d = new Date(`${ymd}T00:00:00.000`);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+function resolvePeriodIsoBounds(
+  fromDate?: string,
+  toDate?: string,
+  fromIso?: string | null,
+  toIso?: string | null,
+): { fromIso: string | null; toIso: string | null } {
+  if (fromIso !== undefined || toIso !== undefined) {
+    return { fromIso: fromIso ?? null, toIso: toIso ?? null };
+  }
+  return {
+    fromIso: toStoreDayStartIso(fromDate),
+    toIso: toStoreDayEndExclusiveIso(toDate),
+  };
 }
 
-function toUtcIsoAtLocalDayEnd(ymd?: string | null): string | null {
-  if (!ymd) return null;
-  const d = new Date(`${ymd}T23:59:59.999`);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+function toStoreDayStartIso(ymd?: string | null): string | null {
+  return storeDayStartIsoFromYmd(ymd);
+}
+
+/** Exclusive upper bound for a store-local calendar day (Asia/Dubai). */
+function toStoreDayEndExclusiveIso(ymd?: string | null): string | null {
+  return storeDayEndExclusiveIsoFromYmd(ymd);
 }
 
 async function fetchScopedMetricsAndSeriesBySalespeople(
@@ -1092,24 +1309,7 @@ async function fetchScopedMetricsAndSeriesBySalespeople(
     } else {
       ordersPendingCount += 1;
     }
-    const date = new Date(order.at);
-    let key: string;
-    let label: string;
-    if (bucket === "day") {
-      key = date.toISOString().slice(0, 10);
-      label = new Date(key + "T12:00:00Z").toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        timeZone: "UTC",
-      });
-    } else {
-      key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-      label = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      });
-    }
+    const { key, label } = storeTimeseriesBucket(order.at, bucket);
     const prev = seriesMap.get(key) || { label, revenue: 0, orders: 0, sortKey: key };
     prev.revenue += order.effCurr;
     prev.orders += 1;
@@ -1510,6 +1710,8 @@ type CustomerQueryParams = {
   rfmGroupFilter?: string;
   fromDate?: string;
   toDate?: string;
+  fromIso?: string | null;
+  toIso?: string | null;
   sortBy?: "total_revenue" | "total_orders" | "shopify_created_at" | "name";
   sortDir?: "asc" | "desc";
   scopeSalespersonIds?: string[];
@@ -1554,6 +1756,8 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
     rfmGroupFilter = "all",
     fromDate,
     toDate,
+    fromIso: fromIsoParam,
+    toIso: toIsoParam,
     sortBy = "total_revenue",
     sortDir = "desc",
     scopeSalespersonIds = [],
@@ -1562,8 +1766,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
     forceScopedFilter = false,
     enabled = true,
   } = params;
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const { fromIso, toIso } = resolvePeriodIsoBounds(fromDate, toDate, fromIsoParam, toIsoParam);
   const salespersonScopeKey = [...scopeSalespersonIds].sort().join(",");
   const scopeKey = [...scopeCustomerIds].sort().join(",");
   const ownerScopeKey = [...scopeOwnerNames].map((name) => name.trim()).filter(Boolean).sort().join(",");
@@ -1578,6 +1781,8 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       rfmGroupFilter,
       fromDate,
       toDate,
+      fromIsoParam,
+      toIsoParam,
       sortBy,
       sortDir,
       salespersonScopeKey,
@@ -1639,7 +1844,7 @@ export function useCustomersPaginated(params: CustomerQueryParams) {
       }
       if (cityFilter !== "all") query = query.eq("city", cityFilter);
       if (fromIso) query = query.gte("shopify_created_at", fromIso);
-      if (toIso) query = query.lte("shopify_created_at", toIso);
+      if (toIso) query = query.lt("shopify_created_at", toIso);
       if (rfmGroupFilter !== "all") query = query.eq("rfm_group", rfmGroupFilter);
       if (assignmentFilter === "assigned") {
         query = query.not("sp_assigned", "is", null).neq("sp_assigned", "Unassigned");
@@ -1795,7 +2000,7 @@ export function useUnfulfilledOrdersCountInRange(
         .select("id", { count: "exact", head: true })
         .in("fulfillment_status", ["unfulfilled", "partial", "on_hold"]);
       if (fromIso) q = q.gte("shopify_created_at", fromIso);
-      if (toIso) q = q.lte("shopify_created_at", toIso);
+      if (toIso) q = q.lt("shopify_created_at", toIso);
       const { count, error } = await q;
       if (error) throw error;
       return count ?? 0;
@@ -1846,7 +2051,10 @@ export function useRevenueByMonthForYear(year?: number, scopeKey = "global") {
 
       const months = Array.from({ length: 12 }, (_, i) => ({
         monthIdx: i,
-        month: new Date(Date.UTC(2020, i, 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }),
+        month: new Date(Date.UTC(2020, i, 1)).toLocaleString("en", {
+          month: "short",
+          timeZone: SHOPIFY_REPORTING_TIMEZONE,
+        }),
         revenue: 0,
         orders: 0,
         year: activeYear,
@@ -1856,8 +2064,12 @@ export function useRevenueByMonthForYear(year?: number, scopeKey = "global") {
         const d = row.shopify_created_at || row.created_at;
         if (!d) continue;
         const parsed = new Date(d);
-        if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() !== activeYear) continue;
-        const idx = parsed.getUTCMonth();
+        if (Number.isNaN(parsed.getTime())) continue;
+        const { key } = storeTimeseriesBucket(d, "month");
+        const [yearStr, monthStr] = key.split("-");
+        const year = Number(yearStr);
+        const idx = Number(monthStr) - 1;
+        if (year !== activeYear || idx < 0 || idx > 11) continue;
         months[idx].revenue += Number(row.total || 0);
         months[idx].orders += 1;
       }
@@ -1908,7 +2120,7 @@ async function paginateOrderTotalsFiltered(
   while (true) {
     let q = supabase.from("shopify_orders").select("total, original_total, current_total");
     if (fromIso) q = q.gte("shopify_created_at", fromIso);
-    if (toIso) q = q.lte("shopify_created_at", toIso);
+    if (toIso) q = q.lt("shopify_created_at", toIso);
     const to = offset + pageSize - 1;
     const { data, error } = await q.range(offset, to);
     if (error) throw error;
@@ -1951,7 +2163,7 @@ export function useCustomersCountInRange(
     queryFn: async () => {
       let q = supabase.from("shopify_customers").select("id", { count: "exact", head: true });
       if (fromIso) q = q.gte("shopify_created_at", fromIso);
-      if (toIso) q = q.lte("shopify_created_at", toIso);
+      if (toIso) q = q.lt("shopify_created_at", toIso);
       const { count, error } = await q;
       if (error) throw error;
       return count ?? 0;
@@ -1987,7 +2199,7 @@ export function useOrdersTimeseriesInRange(
           .from("shopify_orders")
           .select("shopify_created_at, created_at, total, original_total, current_total");
         if (fromIso) q = q.gte("shopify_created_at", fromIso);
-        if (toIso) q = q.lte("shopify_created_at", toIso);
+        if (toIso) q = q.lt("shopify_created_at", toIso);
         const to = offset + pageSize - 1;
         const { data, error } = await q.range(offset, to);
         if (error) throw error;
@@ -2000,24 +2212,7 @@ export function useOrdersTimeseriesInRange(
       for (const row of rows) {
         const d = row.shopify_created_at || row.created_at;
         if (!d) continue;
-        const date = new Date(d);
-        let key: string;
-        let label: string;
-        if (bucket === "day") {
-          key = date.toISOString().slice(0, 10);
-          label = new Date(key + "T12:00:00Z").toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "short",
-            timeZone: "UTC",
-          });
-        } else {
-          key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-          label = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toLocaleDateString("en-GB", {
-            month: "short",
-            year: "numeric",
-            timeZone: "UTC",
-          });
-        }
+        const { key, label } = storeTimeseriesBucket(d, bucket);
         const prev = map.get(key) || { revenue: 0, orders: 0, label, sortKey: key };
         const orig = Number(row.original_total ?? row.total ?? 0);
         const curr = row.current_total != null ? Number(row.current_total) : orig;
@@ -2086,7 +2281,9 @@ export function useScopeOrderTimeseries(
         orders: Number(row.orders_count || 0),
       }));
     }),
-    staleTime: 60_000,
+    staleTime: 10_000,
+    refetchInterval: fromIso && toIso ? 20_000 : false,
+    refetchOnWindowFocus: true,
     enabled: enabled && Boolean(viewerUserId),
   });
 }
@@ -2109,7 +2306,7 @@ export function useRecentOrdersInRange(
         .order("shopify_created_at", { ascending: false, nullsFirst: false })
         .limit(limit);
       if (fromIso) q = q.gte("shopify_created_at", fromIso);
-      if (toIso) q = q.lte("shopify_created_at", toIso);
+      if (toIso) q = q.lt("shopify_created_at", toIso);
       const { data, error } = await q;
       if (error) throw error;
       return data ?? [];
@@ -2127,6 +2324,8 @@ type OrdersQueryParams = {
   fulfillmentFilter?: string;
   fromDate?: string;
   toDate?: string;
+  fromIso?: string | null;
+  toIso?: string | null;
   sortBy?: "shopify_created_at" | "processed_at" | "total" | "order_number";
   sortDir?: "asc" | "desc";
   scopeSalespersonIds?: string[];
@@ -2145,6 +2344,8 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
     fulfillmentFilter = "all",
     fromDate,
     toDate,
+    fromIso: fromIsoParam,
+    toIso: toIsoParam,
     sortBy = "shopify_created_at",
     sortDir = "desc",
     scopeSalespersonIds = [],
@@ -2153,8 +2354,7 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
     forceScopedFilter = false,
     enabled = true,
   } = params;
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const { fromIso, toIso } = resolvePeriodIsoBounds(fromDate, toDate, fromIsoParam, toIsoParam);
   const salespersonScopeKey = [...scopeSalespersonIds].sort().join(",");
   const scopeKey = [...scopeCustomerIds].sort().join(",");
   const ownerScopeKey = [...scopeOwnerNames].map((name) => name.trim()).filter(Boolean).sort().join(",");
@@ -2168,6 +2368,8 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
       fulfillmentFilter,
       fromDate,
       toDate,
+      fromIsoParam,
+      toIsoParam,
       sortBy,
       sortDir,
       salespersonScopeKey,
@@ -2190,7 +2392,7 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
       if (statusFilter !== "all") query = query.eq("financial_status", statusFilter);
       if (fulfillmentFilter !== "all") query = query.eq("fulfillment_status", fulfillmentFilter);
       if (fromIso) query = query.gte("shopify_created_at", fromIso);
-      if (toIso) query = query.lte("shopify_created_at", toIso);
+      if (toIso) query = query.lt("shopify_created_at", toIso);
       const requestedScopedFilter =
         forceScopedFilter ||
         (params.scopeSalespersonIds?.length ?? 0) > 0 ||
@@ -2388,8 +2590,8 @@ export function useProductsPaginated(params: ProductsQueryParams) {
     sortBy = "title",
     sortDir = "asc",
   } = params;
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const fromIso = toStoreDayStartIso(fromDate);
+  const toIso = toStoreDayEndExclusiveIso(toDate);
   return useQuery({
     queryKey: ["shopify-products", page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir],
     queryFn: async () => {
@@ -2407,7 +2609,7 @@ export function useProductsPaginated(params: ProductsQueryParams) {
       }
       if (statusFilter !== "all") query = query.eq("status", statusFilter);
       if (fromIso) query = query.gte("updated_at", fromIso);
-      if (toIso) query = query.lte("updated_at", toIso);
+      if (toIso) query = query.lt("updated_at", toIso);
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
@@ -2503,8 +2705,8 @@ export function useVariantsPaginated(params: VariantsQueryParams) {
     sortBy = "stock",
     sortDir = "asc",
   } = params;
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const fromIso = toStoreDayStartIso(fromDate);
+  const toIso = toStoreDayEndExclusiveIso(toDate);
   return useQuery({
     queryKey: ["shopify-variants", page, pageSize, search, locationFilter, fromDate, toDate, sortBy, sortDir],
     queryFn: async () => {
@@ -2519,7 +2721,7 @@ export function useVariantsPaginated(params: VariantsQueryParams) {
       }
       if (locationFilter !== "all") query = query.eq("inventory_location", locationFilter);
       if (fromIso) query = query.gte("updated_at", fromIso);
-      if (toIso) query = query.lte("updated_at", toIso);
+      if (toIso) query = query.lt("updated_at", toIso);
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
@@ -2551,8 +2753,8 @@ export function useInventoryLocations() {
 
 export function useSyncLogs(params?: { fromDate?: string; toDate?: string; sortDir?: "asc" | "desc"; forcePolling?: boolean }) {
   const { fromDate, toDate, sortDir = "desc", forcePolling = false } = params || {};
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const fromIso = toStoreDayStartIso(fromDate);
+  const toIso = toStoreDayEndExclusiveIso(toDate);
   return useQuery({
     queryKey: ["sync-logs", fromDate, toDate, sortDir],
     queryFn: async () => {
@@ -2562,7 +2764,7 @@ export function useSyncLogs(params?: { fromDate?: string; toDate?: string; sortD
         .order("started_at", { ascending: sortDir === "asc" })
         .limit(50);
       if (fromIso) query = query.gte("started_at", fromIso);
-      if (toIso) query = query.lte("started_at", toIso);
+      if (toIso) query = query.lt("started_at", toIso);
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -2584,8 +2786,8 @@ export function useWebhookEvents(params?: {
   forcePolling?: boolean;
 }) {
   const { fromDate, toDate, sortDir = "desc", topic = "all", forcePolling = false } = params || {};
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const fromIso = toStoreDayStartIso(fromDate);
+  const toIso = toStoreDayEndExclusiveIso(toDate);
   return useQuery({
     queryKey: ["shopify-webhook-events", fromDate, toDate, sortDir, topic],
     queryFn: async () => {
@@ -2595,7 +2797,7 @@ export function useWebhookEvents(params?: {
         .order("received_at", { ascending: sortDir === "asc" })
         .limit(100);
       if (fromIso) query = query.gte("received_at", fromIso);
-      if (toIso) query = query.lte("received_at", toIso);
+      if (toIso) query = query.lt("received_at", toIso);
       if (topic !== "all") query = query.eq("topic", topic);
       const { data, error } = await query;
       if (error) throw error;
@@ -2622,8 +2824,8 @@ type CollectionsQueryParams = {
 
 export function useCollectionsPaginated(params: CollectionsQueryParams) {
   const { page, pageSize, search = "", fromDate, toDate, sortBy = "updated_at", sortDir = "desc" } = params;
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const fromIso = toStoreDayStartIso(fromDate);
+  const toIso = toStoreDayEndExclusiveIso(toDate);
   return useQuery({
     queryKey: ["shopify-collections", page, pageSize, search, fromDate, toDate, sortBy, sortDir],
     queryFn: async () => {
@@ -2637,7 +2839,7 @@ export function useCollectionsPaginated(params: CollectionsQueryParams) {
         query = query.or(`title.ilike.%${escaped}%,handle.ilike.%${escaped}%`);
       }
       if (fromIso) query = query.gte("updated_at", fromIso);
-      if (toIso) query = query.lte("updated_at", toIso);
+      if (toIso) query = query.lt("updated_at", toIso);
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);
@@ -2672,8 +2874,8 @@ export function usePurchaseOrdersPaginated(params: PurchaseOrdersQueryParams) {
     sortBy = "po_date",
     sortDir = "desc",
   } = params;
-  const fromIso = toUtcIsoAtLocalDayStart(fromDate);
-  const toIso = toUtcIsoAtLocalDayEnd(toDate);
+  const fromIso = toStoreDayStartIso(fromDate);
+  const toIso = toStoreDayEndExclusiveIso(toDate);
   return useQuery({
     queryKey: ["purchase-orders", page, pageSize, search, statusFilter, fromDate, toDate, sortBy, sortDir],
     queryFn: async () => {
@@ -2688,7 +2890,7 @@ export function usePurchaseOrdersPaginated(params: PurchaseOrdersQueryParams) {
       }
       if (statusFilter !== "all") query = query.eq("status", statusFilter);
       if (fromIso) query = query.gte("po_date", fromIso);
-      if (toIso) query = query.lte("po_date", toIso);
+      if (toIso) query = query.lt("po_date", toIso);
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
       const { data, error, count } = await query.range(from, to);

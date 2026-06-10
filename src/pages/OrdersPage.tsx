@@ -22,7 +22,7 @@ import { RecordsLoadingOverlay } from "@/components/ui/records-loading-overlay";
 import { useSearchParams } from "react-router-dom";
 import { formatDisplayDate, formatDisplayDateTime, formatOrderMoney, formatOrderShippingAddress } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
-import { getDashboardRange, toLocalYmd, type DatePreset } from "@/lib/dashboard-date-range";
+import { getDashboardRange, toRangeIso, type DatePreset } from "@/lib/dashboard-date-range";
 import { PeriodSelectItems } from "@/components/PeriodSelectItems";
 import { loadUserFilterPreset, saveUserFilterPreset } from "@/lib/filter-preset-storage";
 import { useAuth } from "@/contexts/AuthContext";
@@ -45,9 +45,14 @@ export default function OrdersPage() {
     if (val && ["all", "fulfilled", "partial", "unfulfilled", "on_hold"].includes(val)) return val;
     return "all";
   })();
+  const initialStatus = (() => {
+    const val = searchParams.get("status");
+    if (val && ["all", "paid", "pending", "refunded", "partially_paid"].includes(val)) return val;
+    return "all";
+  })();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [fulfillmentFilter, setFulfillmentFilter] = useState(initialFulfillment);
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
@@ -64,8 +69,8 @@ export default function OrdersPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const pageSize = isMobile ? 10 : 15;
   const range = useMemo(() => getDashboardRange(preset, fromDate || undefined, toDate || undefined), [preset, fromDate, toDate]);
-  const fromYmd = toLocalYmd(range.from);
-  const toYmd = toLocalYmd(range.to);
+  const rangeFromIso = toRangeIso(range.from);
+  const rangeToIso = toRangeIso(range.to);
   const { data: managerOptions = [] } = useSupervisorManagerOptions(user?.id, "orders-page");
   const { data: salespersonOptions = [] } = useSupervisorSalespersonOptions(user?.id, "orders-page");
   const { data: managerTeamOptions = [] } = useManagerTeamMemberOptions(user?.id, "orders-page");
@@ -260,8 +265,8 @@ export default function OrdersPage() {
     search,
     statusFilter,
     fulfillmentFilter,
-    fromDate: fromYmd,
-    toDate: toYmd,
+    fromIso: rangeFromIso,
+    toIso: rangeToIso,
     sortBy,
     sortDir,
     scopeSalespersonIds: finalShouldApplyScopeFilters ? finalScopedSalespersonIds : undefined,

@@ -19,6 +19,8 @@ import {
 import { mapShopifyOrderMoneyFields } from "../_shared/shopify-order-totals.ts";
 import { SHOPIFY_ORDER_DETAIL_GQL, upsertShopifyOrderFromGraphqlNode } from "../_shared/shopify-order-graphql-upsert.ts";
 import { extractOrderReportingFields } from "../_shared/shopify-order-reporting.ts";
+import { recordRefundDeltaIfIncreased } from "../_shared/shopify-order-refund-delta.ts";
+import { syncShopifyAnalyticsOrderFacts } from "../_shared/shopify-analytics-facts-sync.ts";
 
 const isDev = (Deno.env.get("ENV") || Deno.env.get("DENO_ENV") || "").toLowerCase() === "development";
 const devError = (...args: unknown[]) => {
@@ -226,7 +228,7 @@ Deno.serve(async (req) => {
   /** Clears orders checkpoint so the next run walks newest-first without the updatedAt incremental cutoff (backfills e.g. original_total after schema changes). */
   const resetOrdersCheckpoint = requestBody?.reset_orders_checkpoint === true;
   const requestedModule = typeof requestBody?.module === "string" ? requestBody.module : null;
-  const allowedModules = new Set(["customers", "orders", "products", "collections", "purchase_orders"]);
+  const allowedModules = new Set(["customers", "orders", "products", "collections", "purchase_orders", "analytics"]);
   if (requestedModule && !allowedModules.has(requestedModule)) {
     return new Response(JSON.stringify({ error: `Invalid module "${requestedModule}"` }), {
       status: 400,
@@ -751,6 +753,7 @@ Deno.serve(async (req) => {
               totalPriceSet { shopMoney { amount currencyCode } }
               originalTotalPriceSet { shopMoney { amount } }
               currentTotalPriceSet { shopMoney { amount currencyCode } }
+              totalDiscountsSet { shopMoney { amount } }
               currentTotalDiscountsSet { shopMoney { amount } }
               currentShippingPriceSet { shopMoney { amount } }
               totalRefundedSet { shopMoney { amount } }
@@ -801,14 +804,22 @@ Deno.serve(async (req) => {
         .map((edge: any) => edge?.node?.id?.replace("gid://shopify/Order/", ""))
         .filter(Boolean);
       const existingOrderIds = new Set<string>();
+      const existingRefundByShopify = new Map<string, number | null>();
       if (pageShopifyOrderIds.length > 0) {
         const { data: existingRows, error: existingErr } = await supabase
           .from("shopify_orders")
-          .select("shopify_order_id")
+          .select("shopify_order_id, reporting_total_refunded")
           .in("shopify_order_id", pageShopifyOrderIds);
         if (existingErr) throw existingErr;
         for (const row of existingRows || []) {
-          if ((row as any).shopify_order_id) existingOrderIds.add((row as any).shopify_order_id);
+          const shopifyId = (row as { shopify_order_id?: string }).shopify_order_id;
+          if (shopifyId) {
+            existingOrderIds.add(shopifyId);
+            existingRefundByShopify.set(
+              shopifyId,
+              (row as { reporting_total_refunded?: number | null }).reporting_total_refunded ?? null,
+            );
+          }
         }
       }
       const newOrdersPayload: Array<Record<string, unknown>> = [];
@@ -851,8 +862,11 @@ Deno.serve(async (req) => {
         } else {
           updatedOrders++;
         }
-        const money = mapShopifyOrderMoneyFields(o);
         const rep = extractOrderReportingFields(o as Record<string, unknown>);
+        const money = mapShopifyOrderMoneyFields(o, {
+          financialStatus: o.displayFinancialStatus,
+          reportingTotalRefunded: rep.reporting_total_refunded,
+        });
         const fulfillmentNodes = (o.fulfillments || []) as Array<{
           id?: string;
           status?: string;
@@ -921,6 +935,7 @@ Deno.serve(async (req) => {
           test_order: Boolean(o.test),
           updated_at: new Date().toISOString(),
           reporting_line_items_gross: rep.reporting_line_items_gross,
+          reporting_original_total_discounts: rep.reporting_original_total_discounts,
           reporting_total_discounts: rep.reporting_total_discounts,
           reporting_total_shipping: rep.reporting_total_shipping,
           reporting_total_refunded: rep.reporting_total_refunded,
@@ -984,6 +999,17 @@ Deno.serve(async (req) => {
         const orderIdByShopify = new Map<string, string>(
           upsertedOrders.map((r) => [r.shopify_order_id, r.id]),
         );
+        for (const row of updateOrdersPayload) {
+          const shopifyOrderId = String(row.shopify_order_id || "");
+          const orderId = orderIdByShopify.get(shopifyOrderId);
+          if (!orderId) continue;
+          await recordRefundDeltaIfIncreased(
+            supabase,
+            orderId,
+            existingRefundByShopify.get(shopifyOrderId),
+            row.reporting_total_refunded as number | null | undefined,
+          );
+        }
         const orderIds = Array.from(orderIdByShopify.values());
         if (orderIds.length > 0) {
           const { error: deleteItemsErr } = await supabase
@@ -1071,6 +1097,25 @@ Deno.serve(async (req) => {
       status: "success",
       ...(orderNote ? { note: orderNote } : {}),
     };
+
+    try {
+      const analyticsResult = await syncShopifyAnalyticsOrderFacts(
+        supabase,
+        SHOPIFY_STORE_DOMAIN,
+        SHOPIFY_ACCESS_TOKEN,
+      );
+      results.analytics = analyticsResult.skipped
+        ? { synced: 0, status: "skipped", note: analyticsResult.error }
+        : {
+          synced: analyticsResult.synced,
+          status: "success",
+          ...(analyticsResult.query ? { note: analyticsResult.query } : {}),
+        };
+    } catch (analyticsErr) {
+      const analyticsMsg = toErrorMessage(analyticsErr);
+      devWarn("shopify analytics facts sync after orders:", analyticsMsg);
+      results.analytics = { synced: 0, status: "error", error: analyticsMsg };
+    }
   } catch (err) {
     const msg = toErrorMessage(err);
     results.orders = { synced: 0, status: "error", error: msg };
@@ -1546,6 +1591,39 @@ Deno.serve(async (req) => {
       }).eq("id", poLogId);
     }
   }
+  }
+
+  if (shouldRun("analytics") && !results.analytics) {
+    let analyticsLogId: string | null = null;
+    try {
+      analyticsLogId = crypto.randomUUID();
+      await supabase.from("sync_logs").insert({ id: analyticsLogId, sync_type: "analytics", status: "running" });
+      const analyticsResult = await syncShopifyAnalyticsOrderFacts(
+        supabase,
+        SHOPIFY_STORE_DOMAIN,
+        SHOPIFY_ACCESS_TOKEN,
+        {
+          throughDay: typeof requestBody?.through_day === "string" ? requestBody.through_day : undefined,
+        },
+      );
+      const analyticsNote = analyticsResult.skipped
+        ? analyticsResult.error
+        : analyticsResult.query;
+      await finalizeSuccessLog(analyticsLogId, analyticsResult.synced, analyticsNote || undefined);
+      results.analytics = analyticsResult.skipped
+        ? { synced: 0, status: "skipped", note: analyticsResult.error }
+        : { synced: analyticsResult.synced, status: "success", ...(analyticsNote ? { note: analyticsNote } : {}) };
+    } catch (err) {
+      const msg = toErrorMessage(err);
+      results.analytics = { synced: 0, status: "error", error: msg };
+      if (analyticsLogId) {
+        await supabase.from("sync_logs").update({
+          status: "error",
+          error_message: msg,
+          completed_at: new Date().toISOString(),
+        }).eq("id", analyticsLogId);
+      }
+    }
   }
 
   return new Response(

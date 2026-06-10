@@ -1,12 +1,10 @@
 import { Users, CheckCircle2, AlertTriangle, Clock, X, Search } from "lucide-react";
 import {
-  useRecentOrders,
   useRecentOrdersInRange,
-  useUnfulfilledOrdersCount,
-  useUnfulfilledOrdersCountInRange,
   useSalespersonFinancialBreakdown,
-  useScopeFinancialBreakdown,
-  useScopeShopifySalesBreakdown,
+  useShopifyAnalyticsDashboard,
+  shopifyAnalyticsToSalesBreakdown,
+  emptyShopifyAnalyticsDashboard,
   useScopeOrderTimeseries,
 } from "@/hooks/use-shopify-data";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -23,7 +21,6 @@ import { differenceInCalendarDays } from "date-fns";
 import { formatOrderMoney, formatDisplayDate, formatCompactMoney } from "@/lib/format";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
 import { useAuth } from "@/contexts/AuthContext";
-import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
 import { DashboardOverviewSummaryCard } from "@/components/DashboardOverviewSummaryCard";
 
 const TOP_SALES_BAR_COLORS = [
@@ -51,80 +48,44 @@ export default function AdminDashboardPage() {
   );
   const fromIso = toRangeIso(range.from);
   const toIso = toRangeIso(range.to);
-  const cmpFromIso = toRangeIso(range.compareFrom);
-  const cmpToIso = toRangeIso(range.compareTo);
-  const isAll = preset === "all";
   const rangeDays =
     range.from && range.to ? Math.max(1, differenceInCalendarDays(range.to, range.from) + 1) : 365;
   const bucket = rangeDays <= 62 ? "day" : "month";
   const trendTitle = useMemo(() => trendTitleForPreset(preset, "revenue"), [preset]);
 
   const { user } = useAuth();
-  const { data: allBreakdown, isLoading: loadingAllBreakdown } = useScopeFinancialBreakdown(user?.id, null, null, Boolean(user?.id));
-  const { data: rangeBreakdown, isLoading: loadingRangeBreakdown } = useScopeFinancialBreakdown(
+  const { data: analytics, isLoading: loadingAnalytics } = useShopifyAnalyticsDashboard(
     user?.id,
     fromIso,
     toIso,
-    !isAll && Boolean(user?.id),
-  );
-  const { data: compareBreakdown } = useScopeFinancialBreakdown(
-    user?.id,
-    cmpFromIso,
-    cmpToIso,
-    !isAll && Boolean(cmpFromIso && cmpToIso && user?.id),
-  );
-  const { data: allShopifySalesBreakdown, isLoading: loadingAllShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
-    user?.id,
-    null,
-    null,
     Boolean(user?.id),
-  );
-  const { data: rangeShopifySalesBreakdown, isLoading: loadingRangeShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
-    user?.id,
-    fromIso,
-    toIso,
-    !isAll && Boolean(user?.id),
   );
   const { data: series = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
     user?.id,
-    isAll ? null : fromIso,
-    isAll ? null : toIso,
-    isAll ? "month" : bucket,
+    fromIso,
+    toIso,
+    bucket,
     "admin",
     Boolean(user?.id),
   );
-  const { data: unfulfilledOrdersAll = 0, isLoading: loadingUnfulfilledAll } = useUnfulfilledOrdersCount();
-  const { data: unfulfilledOrdersRange = 0, isLoading: loadingUnfulfilledRange } = useUnfulfilledOrdersCountInRange(
-    fromIso,
-    toIso,
-    "admin",
-    !isAll,
-  );
-  const { data: recentOrdersAll = [], isLoading: loadingRecentAll } = useRecentOrders(10);
-  const { data: recentFiltered = [], isLoading: loadingRecentFiltered } = useRecentOrdersInRange(
+  const { data: recentOrders = [], isLoading: loadingRecentOrders } = useRecentOrdersInRange(
     10,
     fromIso,
     toIso,
     "admin",
-    !isAll,
+    Boolean(user?.id),
   );
-  const currentGross = isAll ? (allBreakdown?.current_gross_sales ?? 0) : (rangeBreakdown?.current_gross_sales ?? 0);
-  const totalOrders = isAll ? (allBreakdown?.orders_total_count ?? 0) : (rangeBreakdown?.orders_total_count ?? 0);
-  const paidOrders = isAll ? (allBreakdown?.orders_paid_count ?? 0) : (rangeBreakdown?.orders_paid_count ?? 0);
-  const refundedOrders = isAll ? (allBreakdown?.orders_refunded_count ?? 0) : (rangeBreakdown?.orders_refunded_count ?? 0);
-  const totalCustomers = isAll ? (allBreakdown?.customers_count ?? 0) : (rangeBreakdown?.customers_count ?? 0);
-  const recentOrders = isAll ? recentOrdersAll : recentFiltered;
-  const loadingRevenueTotal = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
-  const loadingOrdersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
-  const loadingCustomersCount = isAll ? loadingAllBreakdown : loadingRangeBreakdown;
-  const unfulfilledOrders = isAll ? unfulfilledOrdersAll : unfulfilledOrdersRange;
-  const loadingUnfulfilled = isAll ? loadingUnfulfilledAll : loadingUnfulfilledRange;
-  const loadingRecentOrders = isAll ? loadingRecentAll : loadingRecentFiltered;
-  const loadingShopifySalesBreakdown = isAll ? loadingAllShopifySalesBreakdown : loadingRangeShopifySalesBreakdown;
-  const shopifySalesBreakdown = isAll ? allShopifySalesBreakdown : rangeShopifySalesBreakdown;
-  const prevCurrentGross = compareBreakdown?.current_gross_sales ?? 0;
-  const revDelta =
-    !isAll && prevCurrentGross > 0 ? (((currentGross - prevCurrentGross) / prevCurrentGross) * 100).toFixed(1) : null;
+  const totalSales = analytics?.total_sales ?? 0;
+  const totalOrders = analytics?.orders_total ?? 0;
+  const paidOrders = analytics?.orders_paid ?? 0;
+  const pendingOrders = analytics?.orders_pending ?? 0;
+  const refundedOrders = analytics?.orders_refunded ?? 0;
+  const totalCustomers = analytics?.customers_count ?? 0;
+  const unfulfilledOrders = analytics?.orders_unfulfilled ?? 0;
+  const shopifySalesBreakdown = useMemo(
+    () => shopifyAnalyticsToSalesBreakdown(analytics ?? emptyShopifyAnalyticsDashboard()),
+    [analytics],
+  );
   const barChartData = useMemo(
     () => series.map((p) => ({ month: p.label, revenue: p.revenue, orders: p.orders })),
     [series],
@@ -140,11 +101,11 @@ export default function AdminDashboardPage() {
   const [salespersonPage, setSalespersonPage] = useState(1);
   const { data: salespersonPerformance = [], isLoading: loadingSalespersonPerformance } = useSalespersonFinancialBreakdown(
     "admin",
-    isAll ? null : fromIso,
-    isAll ? null : toIso,
+    fromIso,
+    toIso,
     null,
     null,
-    Boolean(user?.id) && !loadingRevenueTotal,
+    Boolean(user?.id) && !loadingAnalytics,
   );
 
   useEffect(() => {
@@ -181,11 +142,10 @@ export default function AdminDashboardPage() {
       salespersonPerformance.map((sp) => ({
         name: sp.salesperson_name.split(" ")[0],
         fullName: sp.salesperson_name,
-        grossRevenue: Number(sp.original_gross_sales || 0),
-        refundedAmount: Number(sp.refunded_returned_value || 0),
-        netRevenue: Number(sp.current_gross_sales || 0),
-        netSalesExVat: Number(sp.net_sales_ex_vat || 0),
-        vatCollected: Number(sp.vat_collected || 0),
+        totalSales: Number(sp.current_gross_sales || 0),
+        netSales: Number(sp.net_sales_ex_vat || 0),
+        taxes: Number(sp.vat_collected || 0),
+        returns: Number(sp.refunded_returned_value || 0),
         ordersTotal: Number(sp.orders_total_count || 0),
         ordersPaid: Number(sp.orders_paid_count || 0),
         ordersRefunded: Number(sp.orders_refunded_count || 0),
@@ -205,7 +165,7 @@ export default function AdminDashboardPage() {
   const SALES_ROWS_PER_PAGE = 8;
   const topSalesRows = useMemo(() => salesRows.slice(0, 8), [salesRows]);
   const topSalesMaxRevenue = useMemo(
-    () => Math.max(1, ...topSalesRows.map((row) => Number(row.netRevenue || 0))),
+    () => Math.max(1, ...topSalesRows.map((row) => Number(row.totalSales || 0))),
     [topSalesRows],
   );
   const salespersonTotalPages = Math.max(1, Math.ceil(filteredSalesRows.length / SALES_ROWS_PER_PAGE));
@@ -278,12 +238,6 @@ export default function AdminDashboardPage() {
             />
           </div>
         )}
-        {!isAll && (
-          <p className="text-xs text-muted-foreground font-body sm:ml-auto sm:text-right w-full sm:w-auto">
-            vs previous equivalent period
-            {revDelta != null ? ` · Total sales (orders) ${Number(revDelta) >= 0 ? "+" : ""}${revDelta}%` : ""}
-          </p>
-        )}
       </div>
 
       {showLicenseBanner && (
@@ -352,23 +306,16 @@ export default function AdminDashboardPage() {
           currency={currency}
           delayBase={40}
           salesBreakdown={shopifySalesBreakdown}
-          loadingSales={loadingShopifySalesBreakdown}
+          loadingSales={loadingAnalytics}
           totalOrders={totalOrders}
           paidOrders={paidOrders}
+          pendingOrders={pendingOrders}
           refundedOrders={refundedOrders}
           unfulfilledOrders={unfulfilledOrders}
-          loadingOrders={loadingOrdersCount}
-          loadingUnfulfilled={loadingUnfulfilled}
+          loadingOrders={loadingAnalytics}
+          loadingUnfulfilled={loadingAnalytics}
           totalCustomers={totalCustomers}
-          loadingCustomers={loadingCustomersCount}
-        />
-        <RetailFinancialKpiSection
-          metrics={isAll ? allBreakdown : rangeBreakdown}
-          loading={loadingRevenueTotal}
-          currency={currency}
-          delayBase={80}
-          collapsible
-          defaultOpen={false}
+          loadingCustomers={loadingAnalytics}
         />
       </div>
 
@@ -392,7 +339,7 @@ export default function AdminDashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="month" padding={{ left: 0, right: 0 }} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickLine={false} axisLine={false} />
                   <YAxis width={48} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => formatCompactMoney(v, currency)} tickLine={false} axisLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Current gross"]} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", fontSize: 13 }} formatter={(value: number) => [formatOrderMoney(value, null, currency), "Total sales"]} />
                   <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -404,7 +351,7 @@ export default function AdminDashboardPage() {
             <h3 className="font-heading font-semibold text-foreground mb-4">Top 8 by current gross sales</h3>
             <div className="space-y-3">
               {topSalesRows.map((sp, idx) => {
-                const widthPct = Math.max(4, Math.round((Number(sp.netRevenue || 0) / topSalesMaxRevenue) * 100));
+                const widthPct = Math.max(4, Math.round((Number(sp.totalSales || 0) / topSalesMaxRevenue) * 100));
                 const barColor = TOP_SALES_BAR_COLORS[idx % TOP_SALES_BAR_COLORS.length];
                 return (
                   <div key={sp.fullName} className="flex items-center gap-3">
@@ -419,7 +366,7 @@ export default function AdminDashboardPage() {
                     <div className="w-[150px] text-right">
                       <p className="text-xs font-medium text-foreground truncate">{sp.name}</p>
                       <p className="text-[11px] text-muted-foreground font-body">
-                        {formatOrderMoney(sp.netRevenue, null, currency)}
+                        {formatOrderMoney(sp.totalSales, null, currency)}
                       </p>
                     </div>
                   </div>
@@ -448,7 +395,7 @@ export default function AdminDashboardPage() {
           </div>
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm font-body">
-              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Registered Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Original gross</th><th className="text-right py-2.5 font-medium">Current gross</th><th className="text-right py-2.5 font-medium">Net ex VAT</th><th className="text-right py-2.5 font-medium">VAT</th><th className="text-right py-2.5 font-medium">Refunded value</th></tr></thead>
+              <thead><tr className="border-b text-muted-foreground"><th className="text-left py-2.5 font-medium">Name</th><th className="text-right py-2.5 font-medium">Registered Customers</th><th className="text-right py-2.5 font-medium">Orders</th><th className="text-right py-2.5 font-medium">Paid</th><th className="text-right py-2.5 font-medium">Refunded</th><th className="text-right py-2.5 font-medium">Total sales</th><th className="text-right py-2.5 font-medium">Net sales</th><th className="text-right py-2.5 font-medium">Taxes</th><th className="text-right py-2.5 font-medium">Returns</th></tr></thead>
               <tbody>
                 {pagedSalesRows.map((sp) => {
                   return (
@@ -469,11 +416,10 @@ export default function AdminDashboardPage() {
                       <td className="py-3 text-right font-medium text-foreground">{sp.ordersTotal}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.ordersPaid}</td>
                       <td className="py-3 text-right font-medium text-foreground">{sp.ordersRefunded}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.grossRevenue, null, currency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.netSalesExVat, null, currency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.vatCollected, null, currency)}</td>
-                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.refundedAmount, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.totalSales, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.netSales, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.taxes, null, currency)}</td>
+                      <td className="py-3 text-right font-medium text-foreground">{formatOrderMoney(sp.returns, null, currency)}</td>
                     </tr>
                   );
                 })}
@@ -487,7 +433,7 @@ export default function AdminDashboardPage() {
                   <p className="font-medium text-foreground text-sm">{sp.fullName}</p>
                   <div className="flex justify-between text-xs font-body text-muted-foreground mt-1">
                     <span>{sp.custCount} registered customers · {sp.ordersTotal} orders</span>
-                    <span className="font-medium text-foreground">{formatOrderMoney(sp.netRevenue, null, currency)} current gross</span>
+                    <span className="font-medium text-foreground">{formatOrderMoney(sp.totalSales, null, currency)} total sales</span>
                   </div>
                 </div>
               );

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { mapShopifyOrderMoneyFields, type ShopifyOrderPriceNode } from "./shopify-order-totals.ts";
 import { extractOrderReportingFields } from "./shopify-order-reporting.ts";
+import { recordRefundDeltaIfIncreased } from "./shopify-order-refund-delta.ts";
 
 /** Admin GraphQL: single order with money + line items (same shape as shopify-webhook). */
 export const SHOPIFY_ORDER_DETAIL_GQL = `query($id: ID!) {
@@ -22,6 +23,7 @@ export const SHOPIFY_ORDER_DETAIL_GQL = `query($id: ID!) {
     totalPriceSet { shopMoney { amount currencyCode } }
     originalTotalPriceSet { shopMoney { amount } }
     currentTotalPriceSet { shopMoney { amount currencyCode } }
+    totalDiscountsSet { shopMoney { amount } }
     currentTotalDiscountsSet { shopMoney { amount } }
     currentShippingPriceSet { shopMoney { amount } }
     totalRefundedSet { shopMoney { amount } }
@@ -193,10 +195,16 @@ function dedupeFulfillmentRows(rows: Array<Record<string, unknown>>) {
  * Upserts shopify_orders + shopify_order_items from a GraphQL `order` node.
  * Caller supplies how to resolve internal customer UUID (full customer sync vs lookup-only).
  */
+export type ShopifyOrderUpsertOptions = {
+  /** REST webhook `total_discounts` — original discounts at order creation when GraphQL column is empty. */
+  reportingOriginalTotalDiscountsOverride?: number | null;
+};
+
 export async function upsertShopifyOrderFromGraphqlNode(
   supabase: SupabaseClient,
   orderNode: Record<string, unknown> | null | undefined,
   resolveCustomerUuid: OrderCustomerResolver,
+  options?: ShopifyOrderUpsertOptions,
 ): Promise<{ orderId: string; shopify_order_id: string } | null> {
   const o = orderNode;
   if (!o?.id) return null;
@@ -217,8 +225,22 @@ export async function upsertShopifyOrderFromGraphqlNode(
     defaultEmailAddress?: { emailAddress?: string | null };
   };
   const orderTags = Array.isArray(o.tags) ? (o.tags as unknown[]).join(", ") : "";
-  const money = mapShopifyOrderMoneyFields(o as unknown as ShopifyOrderPriceNode);
   const rep = extractOrderReportingFields(o);
+  const reportingOriginalTotalDiscounts =
+    rep.reporting_original_total_discounts ??
+    (options?.reportingOriginalTotalDiscountsOverride != null &&
+    Number.isFinite(options.reportingOriginalTotalDiscountsOverride)
+      ? Math.round(options.reportingOriginalTotalDiscountsOverride * 100) / 100
+      : null);
+  const { data: existingOrder } = await supabase
+    .from("shopify_orders")
+    .select("id, reporting_total_refunded")
+    .eq("shopify_order_id", shopifyOrderId)
+    .maybeSingle();
+  const money = mapShopifyOrderMoneyFields(o as unknown as ShopifyOrderPriceNode, {
+    financialStatus: o.displayFinancialStatus as string | undefined,
+    reportingTotalRefunded: rep.reporting_total_refunded,
+  });
   const shipping = extractShippingFields(o);
   const fulfillmentRows = extractFulfillmentRows(o, null);
   const fulfillmentSummary = pickLatestTrackingSummary(fulfillmentRows);
@@ -257,6 +279,7 @@ export async function upsertShopifyOrderFromGraphqlNode(
         test_order: Boolean(o.test),
         updated_at: new Date().toISOString(),
         reporting_line_items_gross: rep.reporting_line_items_gross,
+        reporting_original_total_discounts: reportingOriginalTotalDiscounts,
         reporting_total_discounts: rep.reporting_total_discounts,
         reporting_total_shipping: rep.reporting_total_shipping,
         reporting_total_refunded: rep.reporting_total_refunded,
@@ -274,6 +297,13 @@ export async function upsertShopifyOrderFromGraphqlNode(
   if (orderErr) throw orderErr;
   const orderId = orderRows?.id as string | undefined;
   if (!orderId) return null;
+
+  await recordRefundDeltaIfIncreased(
+    supabase,
+    orderId,
+    existingOrder?.reporting_total_refunded,
+    rep.reporting_total_refunded,
+  );
 
   const normalizedFulfillmentRows = dedupeFulfillmentRows(extractFulfillmentRows(o, orderId));
   const { error: delFulfillmentErr } = await supabase

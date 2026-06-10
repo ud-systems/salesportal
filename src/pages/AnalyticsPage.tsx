@@ -6,16 +6,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KpiCard } from "@/components/KpiCard";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ShoppingCart, Users, FileDown, FileText, LayoutList, Info, ListChecks, ChartNoAxesCombined, RefreshCw } from "lucide-react";
+import { ShoppingCart, Users, FileDown, FileText, LayoutList, Info, ChartNoAxesCombined } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   useScopeOrderTimeseries,
-  useScopeFinancialBreakdown,
-  useScopeShopifySalesBreakdown,
+  useShopifyAnalyticsDashboard,
+  shopifyAnalyticsToSalesBreakdown,
+  emptyShopifyAnalyticsDashboard,
   useAnalyticsOverviewKpis,
   useAnalyticsRfmGroupBreakdown,
   useAnalyticsRfmScoreMatrix,
-  triggerOrderFinancialRefresh,
 } from "@/hooks/use-shopify-data";
 import { getDashboardRange, toRangeIso, formatPresetLabel, type DatePreset } from "@/lib/dashboard-date-range";
 import { PeriodSelectItems } from "@/components/PeriodSelectItems";
@@ -26,39 +26,17 @@ import {
   ANALYTICS_REPORTS,
   fetchReportData,
   rowsToCsv,
+  SHOPIFY_REPORT_ATTRIBUTION_NOTE,
   type ReportDefinition,
 } from "@/lib/analytics-report-data";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toast } from "sonner";
-import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
-import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
+import { DashboardOverviewSummaryCard } from "@/components/DashboardOverviewSummaryCard";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { useAdminOrderFinancialReconciliationCandidates } from "@/hooks/use-admin-order-reconciliation";
 
 const PREVIEW_ROW_CAP = 200;
-const RECON_CSV_COLUMNS = [
-  "order_id",
-  "shopify_order_id",
-  "order_number",
-  "shopify_created_at",
-  "financial_status",
-  "status_norm",
-  "total",
-  "original_total",
-  "current_total",
-  "subtotal",
-  "total_tax",
-  "eff_orig",
-  "eff_curr",
-  "eff_tax",
-  "crm_refunded_returned_value",
-  "missing_current_total",
-  "flag_reasons",
-] as const;
 const MONEY_COLUMN_HINTS = /(revenue|total|subtotal|tax|price|amount|avg|average|aov|order value)/i;
 const PDF_BRAND_PRIMARY_RGB: [number, number, number] = [93, 163, 67];
 const PDF_BRAND_SECONDARY_RGB: [number, number, number] = [108, 191, 64];
@@ -170,7 +148,7 @@ async function getBrandLogoBadgeDataUrl(): Promise<string | null> {
 }
 
 export default function AnalyticsPage() {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const { data: currency = "GBP" } = useShopDisplayCurrency();
   const [preset, setPreset] = useState<DatePreset>("month");
   const [customFrom, setCustomFrom] = useState("");
@@ -183,9 +161,6 @@ export default function AnalyticsPage() {
   const [analyticsTab, setAnalyticsTab] = useState<"overview" | "reports">("overview");
   const [previewScrollProgress, setPreviewScrollProgress] = useState(0);
   const previewScrollRef = useRef<HTMLDivElement | null>(null);
-  const [reconOnlyFlagged, setReconOnlyFlagged] = useState(true);
-  const [reconResyncing, setReconResyncing] = useState(false);
-
   const range = useMemo(
     () => getDashboardRange(preset, customFrom || undefined, customTo || undefined),
     [preset, customFrom, customTo],
@@ -197,27 +172,16 @@ export default function AnalyticsPage() {
   const bucket = rangeDays <= 62 ? "day" : "month";
 
   const scopeKey = "analytics";
-  const reconRangeBounded = Boolean(fromIso && toIso);
-  const reconQueryEnabled = Boolean(user?.id && isAdmin && reconRangeBounded && analyticsTab === "overview");
-  const {
-    data: reconRows = [],
-    isLoading: reconLoading,
-    isError: reconIsError,
-    error: reconQueryError,
-    refetch: refetchRecon,
-  } = useAdminOrderFinancialReconciliationCandidates(fromIso, toIso, reconOnlyFlagged, 500, reconQueryEnabled);
 
-  const { data: metrics, isLoading: loadingMetrics } = useScopeFinancialBreakdown(
+  const { data: analytics, isLoading: loadingAnalytics } = useShopifyAnalyticsDashboard(
     user?.id,
     fromIso,
     toIso,
     Boolean(user?.id),
   );
-  const { data: shopifySalesBreakdown, isLoading: loadingShopifySalesBreakdown } = useScopeShopifySalesBreakdown(
-    user?.id,
-    fromIso,
-    toIso,
-    Boolean(user?.id),
+  const shopifySalesBreakdown = useMemo(
+    () => shopifyAnalyticsToSalesBreakdown(analytics ?? emptyShopifyAnalyticsDashboard()),
+    [analytics],
   );
   const { data: series = [], isLoading: loadingSeries } = useScopeOrderTimeseries(
     user?.id,
@@ -244,7 +208,12 @@ export default function AnalyticsPage() {
     Boolean(user?.id),
   );
 
-  const orders = metrics?.orders_total_count ?? 0;
+  const orders = analytics?.orders_total ?? 0;
+  const paidOrders = analytics?.orders_paid ?? 0;
+  const pendingOrders = analytics?.orders_pending ?? 0;
+  const refundedOrders = analytics?.orders_refunded ?? 0;
+  const unfulfilledOrders = analytics?.orders_unfulfilled ?? 0;
+  const totalCustomers = analytics?.customers_count ?? 0;
   const activeBuyers = overviewKpis?.active_buyers_count ?? 0;
   const registrations = overviewKpis?.registrations_count ?? 0;
   const chartSeries = useMemo(() => series.map((point) => ({ ...point })), [series]);
@@ -368,7 +337,7 @@ export default function AnalyticsPage() {
   const periodSubtitle = selectedDef?.requiresRange
     ? `Period: ${formatPresetLabel(preset)}${
         rangeReady ? ` | ${formatDisplayDate(fromIso)} - ${formatDisplayDate(toIso)}` : ""
-      }`
+      } · ${SHOPIFY_REPORT_ATTRIBUTION_NOTE}`
     : "Snapshot report (not filtered by period)";
 
   const runExportCsv = async () => {
@@ -474,74 +443,6 @@ export default function AnalyticsPage() {
     }
   };
 
-  const exportReconciliationCsv = () => {
-    if (!reconRows.length) {
-      toast.error("No rows to export for this filter.");
-      return;
-    }
-    const cols = [...RECON_CSV_COLUMNS];
-    const rows = reconRows.map((r) =>
-      cols.map((key) => {
-        const v = r[key as keyof (typeof reconRows)[number]];
-        if (v === null || v === undefined) return "";
-        if (typeof v === "boolean") return v ? "true" : "false";
-        return v as string | number;
-      }),
-    );
-    const csv = rowsToCsv(cols, rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    const slug = `order-financial-reconciliation-${reconOnlyFlagged ? "flagged" : "all"}-${new Date().toISOString().slice(0, 10)}`;
-    a.download = `${slug}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast.success("Reconciliation CSV downloaded");
-  };
-
-  const handleReconResyncListedFromShopify = async () => {
-    if (!reconRows.length) return;
-    setReconResyncing(true);
-    try {
-      const ids = reconRows.map((r) => r.shopify_order_id).filter(Boolean);
-      const data = (await triggerOrderFinancialRefresh({ shopify_order_ids: ids })) as {
-        refreshed?: number;
-        failed?: number;
-      };
-      toast.success(
-        `Shopify re-fetch finished: ${Number(data?.refreshed ?? 0)} updated, ${Number(data?.failed ?? 0)} failed (max 40 per run).`,
-      );
-      await refetchRecon();
-    } catch (e) {
-      toast.error(getReadableErrorMessage(e, "Re-fetch from Shopify failed"));
-    } finally {
-      setReconResyncing(false);
-    }
-  };
-
-  const handleReconResyncStaleRefundedGlobal = async () => {
-    setReconResyncing(true);
-    try {
-      const data = (await triggerOrderFinancialRefresh({ auto_stale_refunded_totals_match: true })) as {
-        refreshed?: number;
-        failed?: number;
-      };
-      toast.success(
-        `Stale refunded-like orders: ${Number(data?.refreshed ?? 0)} updated, ${Number(data?.failed ?? 0)} failed.`,
-      );
-      await refetchRecon();
-    } catch (e) {
-      toast.error(getReadableErrorMessage(e, "Stale-order refresh failed"));
-    } finally {
-      setReconResyncing(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!reconIsError || !reconQueryError) return;
-    toast.error(getReadableErrorMessage(reconQueryError, "Could not load order reconciliation."));
-  }, [reconIsError, reconQueryError]);
-
   return (
     <div className="w-full space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 opacity-0 animate-fade-in">
@@ -613,194 +514,41 @@ export default function AnalyticsPage() {
 
         <TabsContent value="overview" className="space-y-6">
           <div className="space-y-3">
-            <ShopifySalesBreakdownSection
-              breakdown={shopifySalesBreakdown}
-              loading={loadingShopifySalesBreakdown}
+            <DashboardOverviewSummaryCard
               currency={currency}
               delayBase={50}
+              salesBreakdown={shopifySalesBreakdown}
+              loadingSales={loadingAnalytics}
+              totalOrders={orders}
+              paidOrders={paidOrders}
+              pendingOrders={pendingOrders}
+              refundedOrders={refundedOrders}
+              unfulfilledOrders={unfulfilledOrders}
+              loadingOrders={loadingAnalytics}
+              loadingUnfulfilled={loadingAnalytics}
+              totalCustomers={totalCustomers}
+              loadingCustomers={loadingAnalytics}
             />
-            <RetailFinancialKpiSection
-              metrics={metrics}
-              loading={loadingMetrics}
-              currency={currency}
-              delayBase={100}
-              collapsible
-              defaultOpen={false}
-            />
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <KpiCard
-                title="Total orders"
-                value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(orders)}
-                icon={ShoppingCart}
-                delay={200}
-              />
+            <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
               <KpiCard
                 title="Active buyers"
                 value={loadingOverviewKpis ? <Skeleton className="h-8 w-16 rounded-md" /> : String(activeBuyers)}
                 icon={Users}
-                delay={250}
+                delay={200}
               />
               <KpiCard
                 title="Registrations"
                 value={loadingOverviewKpis ? <Skeleton className="h-8 w-16 rounded-md" /> : String(registrations)}
                 icon={Users}
-                delay={300}
+                delay={250}
               />
             </div>
           </div>
 
-          {isAdmin && reconRangeBounded && (
-            <div className="card-float p-4 sm:p-5 space-y-4 opacity-0 animate-fade-in">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <ListChecks className="h-5 w-5 text-primary shrink-0" />
-                    <h3 className="font-heading font-semibold text-foreground">Order financial reconciliation</h3>
-                  </div>
-                  <p className="text-xs sm:text-sm text-muted-foreground font-body max-w-3xl leading-relaxed">
-                    Live CRM row values for the selected period (filter: <span className="font-medium">shopify_created_at</span>, same window as KPI charts).{" "}
-                    <span className="font-medium">crm_refunded_returned_value</span> matches the retail KPI refund slice. Flagged rows are heuristics for sync gaps — export and compare line-by-line to Shopify for those order IDs.
-                  </p>
-                </div>
-                <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0 lg:items-end">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="recon-only-flagged"
-                      checked={reconOnlyFlagged}
-                      onCheckedChange={(v) => setReconOnlyFlagged(Boolean(v))}
-                    />
-                    <Label htmlFor="recon-only-flagged" className="text-sm font-body cursor-pointer whitespace-nowrap">
-                      Only flagged
-                    </Label>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void refetchRecon()}
-                      disabled={reconLoading || reconResyncing}
-                      className="font-body"
-                    >
-                      Refresh
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => void handleReconResyncListedFromShopify()}
-                      disabled={!reconRows.length || reconLoading || reconResyncing}
-                      className="font-body"
-                      title="Re-fetch up to 40 listed orders from Shopify Admin (same payload as webhooks)."
-                    >
-                      <RefreshCw className={`h-4 w-4 mr-1.5 ${reconResyncing ? "animate-spin" : ""}`} />
-                      Re-sync listed
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleReconResyncStaleRefundedGlobal()}
-                      disabled={reconLoading || reconResyncing}
-                      className="font-body"
-                      title="Orders with refunded-like status but current_total still equals total (Shopify timing); max 40."
-                    >
-                      Stale refunded scan
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="sm"
-                      onClick={exportReconciliationCsv}
-                      disabled={!reconRows.length || reconLoading}
-                      className="font-body"
-                    >
-                      <FileDown className="h-4 w-4 mr-1.5" />
-                      Export CSV
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              {reconIsError ? (
-                <p className="text-sm text-destructive font-body">
-                  Reconciliation query failed. If the RPC is missing, apply{" "}
-                  <code className="text-xs break-all">supabase/migrations/20260518140000_admin_order_financial_reconciliation_rpc.sql</code> in Supabase SQL Editor.
-                </p>
-              ) : reconLoading ? (
-                <Skeleton className="h-40 w-full rounded-xl" />
-              ) : reconRows.length === 0 ? (
-                <p className="text-sm text-muted-foreground font-body">
-                  {reconOnlyFlagged
-                    ? "No orders matched the flag rules for this period — try turning off \"Only flagged\" to list every order in range (capped at 500), or pick a day where Shopify and CRM still disagree."
-                    : "No orders in this period."}
-                </p>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border max-h-[min(420px,70vh)] overflow-y-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="whitespace-nowrap text-xs">Order #</TableHead>
-                        <TableHead className="whitespace-nowrap text-xs">Shopify order ID</TableHead>
-                        <TableHead className="whitespace-nowrap text-xs">Created</TableHead>
-                        <TableHead className="whitespace-nowrap text-xs">Financial status</TableHead>
-                        <TableHead className="text-right whitespace-nowrap text-xs">total</TableHead>
-                        <TableHead className="text-right whitespace-nowrap text-xs">original_total</TableHead>
-                        <TableHead className="text-right whitespace-nowrap text-xs">current_total</TableHead>
-                        <TableHead className="text-right whitespace-nowrap text-xs">subtotal</TableHead>
-                        <TableHead className="text-right whitespace-nowrap text-xs">total_tax</TableHead>
-                        <TableHead className="text-right whitespace-nowrap text-xs">CRM refund slice</TableHead>
-                        <TableHead className="text-xs min-w-[200px]">Flags</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {reconRows.map((row) => (
-                        <TableRow key={row.order_id}>
-                          <TableCell className="font-mono text-xs whitespace-nowrap">{row.order_number ?? "—"}</TableCell>
-                          <TableCell className="font-mono text-xs max-w-[140px] truncate" title={row.shopify_order_id}>
-                            {row.shopify_order_id}
-                          </TableCell>
-                          <TableCell className="text-xs whitespace-nowrap">
-                            {row.shopify_created_at ? formatDisplayDate(row.shopify_created_at) : "—"}
-                          </TableCell>
-                          <TableCell className="text-xs whitespace-nowrap">{row.financial_status ?? "—"}</TableCell>
-                          <TableCell className="text-xs text-right whitespace-nowrap">
-                            {formatOrderMoney(Number(row.total ?? 0), null, currency)}
-                          </TableCell>
-                          <TableCell className="text-xs text-right whitespace-nowrap">
-                            {formatOrderMoney(Number(row.original_total ?? 0), null, currency)}
-                          </TableCell>
-                          <TableCell className="text-xs text-right whitespace-nowrap">
-                            {row.current_total == null ? "—" : formatOrderMoney(Number(row.current_total), null, currency)}
-                          </TableCell>
-                          <TableCell className="text-xs text-right whitespace-nowrap">
-                            {formatOrderMoney(Number(row.subtotal ?? 0), null, currency)}
-                          </TableCell>
-                          <TableCell className="text-xs text-right whitespace-nowrap">
-                            {formatOrderMoney(Number(row.total_tax ?? 0), null, currency)}
-                          </TableCell>
-                          <TableCell className="text-xs text-right whitespace-nowrap">
-                            {formatOrderMoney(Number(row.crm_refunded_returned_value ?? 0), null, currency)}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground leading-snug">{row.flag_reasons || "—"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {isAdmin && !reconRangeBounded && (
-            <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground font-body">
-              Choose a bounded period (not &quot;All time&quot;) to run per-order financial reconciliation against Shopify.
-            </div>
-          )}
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card-float p-4 sm:p-5">
               <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
-                <h3 className="font-heading font-semibold text-foreground">Current gross sales trend</h3>
+                <h3 className="font-heading font-semibold text-foreground">Total sales trend</h3>
                 <span className="text-xs text-muted-foreground font-body">
                   Total {formatOrderMoney(chartTotals.revenue, null, currency)}
                 </span>
@@ -846,7 +594,7 @@ export default function AnalyticsPage() {
                     <RechartsTooltip
                       formatter={(v: number, _name, item) => {
                         if (item?.dataKey === "orders") return [Number(v || 0).toLocaleString(), "Orders"];
-                        return [formatOrderMoney(v, null, currency), "Current gross sales"];
+                        return [formatOrderMoney(v, null, currency), "Total sales"];
                       }}
                       labelFormatter={(label) => `Period: ${label}`}
                       contentStyle={{

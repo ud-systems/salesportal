@@ -830,6 +830,7 @@ export type Database = {
         Args: { _order_id: string; _viewer_user_id: string }
         Returns: Database["public"]["Tables"]["shopify_order_items"]["Row"][]
       }
+      mark_user_notifications_read: { Args: { _ids: string[] }; Returns: number }
       get_user_scope_user_ids: { Args: { _user_id: string }; Returns: string[] }
       get_salesperson_name: { Args: { _user_id: string }; Returns: string }
       has_role: {

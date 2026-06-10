@@ -26,6 +26,7 @@ export function sumLineItemsListGross(lineItemsRoot: unknown): number {
 
 export type OrderReportingRow = {
   reporting_line_items_gross: number;
+  reporting_original_total_discounts: number | null;
   reporting_total_discounts: number | null;
   reporting_total_shipping: number | null;
   reporting_total_refunded: number | null;
@@ -40,6 +41,7 @@ export function extractOrderReportingFields(orderNode: Record<string, unknown>):
   const lineGross = sumLineItemsListGross(orderNode.lineItems);
   return {
     reporting_line_items_gross: lineGross,
+    reporting_original_total_discounts: shopMoneyAmount(orderNode.totalDiscountsSet),
     reporting_total_discounts: shopMoneyAmount(orderNode.currentTotalDiscountsSet),
     reporting_total_shipping: shopMoneyAmount(orderNode.currentShippingPriceSet),
     reporting_total_refunded: shopMoneyAmount(orderNode.totalRefundedSet),

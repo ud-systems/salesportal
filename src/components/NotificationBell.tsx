@@ -106,7 +106,11 @@ export function NotificationBell({ className }: { className?: string }) {
               size="sm"
               className="h-8 rounded-lg text-xs font-body"
               disabled={markRead.isPending}
-              onClick={() => void markRead.mutateAsync(unread.map((n) => n.id))}
+              onClick={() =>
+                void markRead.mutateAsync(unread.map((n) => n.id)).catch(() => {
+                  toast.error("Could not mark notifications as read. Please try again.");
+                })
+              }
             >
               Mark all read
             </Button>

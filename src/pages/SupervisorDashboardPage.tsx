@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { ShoppingCart } from "lucide-react";
-import { KpiCard } from "@/components/KpiCard";
-import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
-import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
+import { DashboardOverviewSummaryCard } from "@/components/DashboardOverviewSummaryCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useAggregateFinancialBreakdownForViewers,
-  useAggregateShopifySalesBreakdownForViewers,
-  emptyScopeShopifySalesBreakdown,
+  useAggregateShopifyAnalyticsDashboardForViewers,
+  useShopifyAnalyticsDashboard,
+  useSelectedSalespeopleShopifyAnalyticsDashboard,
+  shopifyAnalyticsToSalesBreakdown,
+  emptyShopifyAnalyticsDashboard,
   useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
-  useScopeShopifySalesBreakdown,
-  useSelectedSalespeopleShopifySalesBreakdown,
   useSalespersonFinancialBreakdown,
   useSupervisorSelectedManagerTimeseries,
   useSupervisorManagerScopePerformance,
@@ -264,14 +262,14 @@ export default function SupervisorDashboardPage() {
             ? loadingSalespersonScopedData
             : loadingSelectedSeries;
 
-  const { data: shopifyLayer2All, isLoading: loadingShopifyLayer2All } = useScopeShopifySalesBreakdown(
+  const { data: analyticsAll, isLoading: loadingAnalyticsAll } = useShopifyAnalyticsDashboard(
     user?.id,
     fromIso,
     toIso,
     Boolean(user?.id) && scopeMode === "all",
   );
-  const { data: shopifyLayer2Aggregate, isLoading: loadingShopifyLayer2Aggregate } =
-    useAggregateShopifySalesBreakdownForViewers(
+  const { data: analyticsAggregate, isLoading: loadingAnalyticsAggregate } =
+    useAggregateShopifyAnalyticsDashboardForViewers(
       selectedViewerIds,
       fromIso,
       toIso,
@@ -281,8 +279,8 @@ export default function SupervisorDashboardPage() {
         !isSalespersonDrilldown &&
         selectedViewerIds.length > 0,
     );
-  const { data: shopifyLayer2Salespeople, isLoading: loadingShopifyLayer2Salespeople } =
-    useSelectedSalespeopleShopifySalesBreakdown(
+  const { data: analyticsSalespeople, isLoading: loadingAnalyticsSalespeople } =
+    useSelectedSalespeopleShopifyAnalyticsDashboard(
       user?.id,
       selectedSalespersonIds,
       fromIso,
@@ -292,35 +290,33 @@ export default function SupervisorDashboardPage() {
         !isSalespersonDrilldown &&
         selectedSalespersonIds.length > 0,
     );
-  const { data: shopifyLayer2Drill, isLoading: loadingShopifyLayer2Drill } = useScopeShopifySalesBreakdown(
+  const { data: analyticsDrill, isLoading: loadingAnalyticsDrill } = useShopifyAnalyticsDashboard(
     drilledSalespersonId,
     fromIso,
     toIso,
     Boolean(user?.id && drilledSalespersonId) && isSalespersonDrilldown,
   );
 
-  const shopifySalesBreakdown = useMemo(() => {
-    if (scopeMode === "all") return shopifyLayer2All ?? emptyScopeShopifySalesBreakdown();
-    if (isSalespersonDrilldown) return shopifyLayer2Drill ?? emptyScopeShopifySalesBreakdown();
-    if (scopeMode === "salesperson") return shopifyLayer2Salespeople ?? emptyScopeShopifySalesBreakdown();
-    return shopifyLayer2Aggregate ?? emptyScopeShopifySalesBreakdown();
-  }, [
-    scopeMode,
-    isSalespersonDrilldown,
-    shopifyLayer2All,
-    shopifyLayer2Drill,
-    shopifyLayer2Salespeople,
-    shopifyLayer2Aggregate,
-  ]);
+  const analytics = useMemo(() => {
+    if (scopeMode === "all") return analyticsAll ?? emptyShopifyAnalyticsDashboard();
+    if (isSalespersonDrilldown) return analyticsDrill ?? emptyShopifyAnalyticsDashboard();
+    if (scopeMode === "salesperson") return analyticsSalespeople ?? emptyShopifyAnalyticsDashboard();
+    return analyticsAggregate ?? emptyShopifyAnalyticsDashboard();
+  }, [scopeMode, isSalespersonDrilldown, analyticsAll, analyticsDrill, analyticsSalespeople, analyticsAggregate]);
 
-  const loadingShopifySalesBreakdown =
+  const shopifySalesBreakdown = useMemo(
+    () => shopifyAnalyticsToSalesBreakdown(analytics),
+    [analytics],
+  );
+
+  const loadingAnalytics =
     scopeMode === "all"
-      ? loadingShopifyLayer2All
+      ? loadingAnalyticsAll
       : isSalespersonDrilldown
-        ? loadingShopifyLayer2Drill
+        ? loadingAnalyticsDrill
         : scopeMode === "salesperson"
-          ? loadingShopifyLayer2Salespeople
-          : loadingShopifyLayer2Aggregate;
+          ? loadingAnalyticsSalespeople
+          : loadingAnalyticsAggregate;
 
   const quickScopedIds = useMemo(() => {
     if (quickManagerFilter === "all") return null;
@@ -507,28 +503,31 @@ export default function SupervisorDashboardPage() {
       {compareEnabled && scopeMode !== "all" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Selected scope current gross</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.current_gross_sales || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Selected scope total sales</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(analytics?.total_sales || 0, null, currency)}</p>
           </div>
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Full scope current gross</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.current_gross_sales || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Full scope total sales</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(analyticsAll?.total_sales || 0, null, currency)}</p>
           </div>
         </div>
       )}
 
-      <div className="space-y-3">
-        <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
-        <ShopifySalesBreakdownSection
-          breakdown={shopifySalesBreakdown}
-          loading={loadingShopifySalesBreakdown}
-          currency={currency}
-          delayBase={110}
-        />
-        <div className="grid grid-cols-1 sm:max-w-xs">
-          <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
-        </div>
-      </div>
+      <DashboardOverviewSummaryCard
+        currency={currency}
+        delayBase={50}
+        salesBreakdown={shopifySalesBreakdown}
+        loadingSales={loadingAnalytics}
+        totalOrders={analytics?.orders_total ?? 0}
+        paidOrders={analytics?.orders_paid ?? 0}
+        pendingOrders={analytics?.orders_pending ?? 0}
+        refundedOrders={analytics?.orders_refunded ?? 0}
+        unfulfilledOrders={analytics?.orders_unfulfilled ?? 0}
+        loadingOrders={loadingAnalytics}
+        loadingUnfulfilled={loadingAnalytics}
+        totalCustomers={analytics?.customers_count ?? 0}
+        loadingCustomers={loadingAnalytics}
+      />
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
         <h3 className="font-heading font-semibold text-foreground mb-4">{trendTitle}</h3>

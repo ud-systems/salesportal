@@ -1,4 +1,10 @@
+import { TZDate } from "@date-fns/tz";
 import { supabase } from "@/integrations/supabase/client";
+import { SHOPIFY_REPORTING_TIMEZONE, toStoreYmd } from "@/lib/shopify-reporting-timezone";
+
+/** Shown on period-filtered report exports (matches dashboard attribution). */
+export const SHOPIFY_REPORT_ATTRIBUTION_NOTE =
+  "Asia/Dubai · sales event day · Shopify Analytics methodology";
 
 export type ReportFetchParams = {
   fromIso: string | null;
@@ -21,55 +27,64 @@ export const ANALYTICS_REPORTS: ReportDefinition[] = [
   {
     id: "sales_summary",
     title: "Sales summary",
-    description: "KPI totals: revenue, orders, tax, subtotal, average order value for the period.",
+    description:
+      "Shopify Analytics breakdown for the period — matches the Analytics overview KPIs (sales event day, Asia/Dubai).",
     requiresRange: true,
   },
   {
     id: "orders_detail",
     title: "Orders detail",
-    description: "Every order in the period with customer, totals, payment and fulfillment status.",
+    description:
+      "Orders whose sales event day falls in the period. Includes Shopify reporting columns for operational export.",
     requiresRange: true,
   },
   {
     id: "line_items",
     title: "Line items",
-    description: "All line items sold in the period with order reference, SKU, quantity and line revenue.",
+    description:
+      "Line items for orders attributed to the period by sales event day (Dubai). Line revenue is unit price × qty.",
     requiresRange: true,
   },
   {
     id: "top_products",
     title: "Top products by revenue",
-    description: "Products ranked by revenue and units sold in the period (from order lines).",
+    description:
+      "Products ranked by line revenue for orders in the period (sales event day). CRM line rollup, not Shopify Products report.",
     requiresRange: true,
   },
   {
     id: "top_customers",
     title: "Top customers by revenue",
-    description: "Customers ranked by order revenue and order count in the period.",
+    description:
+      "Customers ranked by scoped Shopify analytics total sales for orders in the period (sales event day).",
     requiresRange: true,
   },
   {
     id: "payment_status",
     title: "Revenue by payment status",
-    description: "Totals grouped by financial status (paid, pending, refunded, etc.).",
+    description:
+      "Orders in period (sales event day) grouped by payment status with Shopify analytics total sales.",
     requiresRange: true,
   },
   {
     id: "fulfillment_status",
     title: "Orders by fulfillment",
-    description: "Order counts and revenue grouped by fulfillment status.",
+    description:
+      "Orders in period (sales event day) grouped by fulfillment with Shopify analytics total sales.",
     requiresRange: true,
   },
   {
     id: "tax_summary",
     title: "Tax & totals",
-    description: "Subtotal, tax and grand total rolled up for the period.",
+    description:
+      "Shopify Analytics component totals for the period — same pipeline as the overview sales breakdown.",
     requiresRange: true,
   },
   {
     id: "sales_by_salesperson",
     title: "Revenue by salesperson",
-    description: "Identity-based attribution from salesperson/customer assignment mappings.",
+    description:
+      "Scoped Shopify analytics total sales by assigned salesperson (sales event day, identity attribution).",
     requiresRange: true,
   },
   {
@@ -87,31 +102,65 @@ export const ANALYTICS_REPORTS: ReportDefinition[] = [
   {
     id: "customer_directory",
     title: "Customer directory",
-    description: "Customers with orders, revenue, spend currency, city and assigned salesperson.",
+    description: "All-time customer directory with lifetime orders and revenue (not period-filtered).",
     requiresRange: false,
   },
   {
     id: "manager_performance",
     title: "Manager performance",
-    description: "Team performance rollups for users with manager role.",
+    description: "Manager team rollups with Shopify analytics total sales for the period (matches dashboard).",
     requiresRange: true,
   },
   {
     id: "supervisor_performance",
     title: "Supervisor performance",
-    description: "Team performance rollups for users with supervisor role.",
+    description: "Supervisor team rollups with Shopify analytics total sales for the period (matches dashboard).",
     requiresRange: true,
   },
   {
     id: "team_performance",
     title: "Team performance overview",
-    description: "Per-viewer team rollups across hierarchy scopes.",
+    description: "Per-viewer team rollups with Shopify analytics total sales for the period.",
     requiresRange: true,
   },
 ];
 
 // Lower page size to reduce per-call payload and timeout risk on heavy scoped report pulls.
 const PAGE = 200;
+
+function orderReportingDayYmd(createdAt: unknown): string {
+  if (!createdAt) return "";
+  return toStoreYmd(new TZDate(String(createdAt), SHOPIFY_REPORTING_TIMEZONE));
+}
+
+/** Client estimate when per-order RPC is not used (operational export). */
+function orderAnalyticsTotalEstimate(r: Record<string, unknown>): number {
+  const gross = Number(r.reporting_line_items_gross ?? r.subtotal ?? 0);
+  const disc = Number(r.reporting_total_discounts ?? 0);
+  const ship = Number(r.reporting_total_shipping ?? 0);
+  const tax = Number(r.total_tax ?? 0);
+  return Math.round((gross - disc + ship + tax) * 100) / 100;
+}
+
+async function fetchShopifyBreakdown(viewerUserId: string, fromIso: string, toIso: string) {
+  const { data, error } = await supabase.rpc("get_scope_shopify_sales_breakdown", {
+    _viewer_user_id: viewerUserId,
+    _from_iso: fromIso,
+    _to_iso: toIso,
+  });
+  if (error) throw asReportError(error);
+  return (data?.[0] ?? {}) as Record<string, unknown>;
+}
+
+async function fetchFinancialBreakdown(viewerUserId: string, fromIso: string, toIso: string) {
+  const { data, error } = await supabase.rpc("get_scope_financial_breakdown", {
+    _viewer_user_id: viewerUserId,
+    _from_iso: fromIso,
+    _to_iso: toIso,
+  });
+  if (error) throw asReportError(error);
+  return (data?.[0] ?? {}) as Record<string, unknown>;
+}
 
 function asReportError(error: unknown): Error {
   if (error instanceof Error) return error;
@@ -149,6 +198,7 @@ async function paginateScopedOrdersInRange(
       _page_size: PAGE,
       _force_scoped_filter: true,
       _customer_ids: null,
+      _filter_by_reporting_day: true,
     });
     if (error) throw asReportError(error);
     const rows = (data ?? []) as { row_data?: Record<string, unknown> | null; total_count?: number | null }[];
@@ -219,6 +269,7 @@ async function paginateScopedOrderItemsInRange(
       _page: page,
       _page_size: PAGE,
       _force_scoped_filter: true,
+      _filter_by_reporting_day: true,
     });
     if (error) throw asReportError(error);
     const rows = (data ?? []) as { row_data?: Record<string, unknown> | null; total_count?: number | null }[];
@@ -246,25 +297,32 @@ export async function fetchReportData(
   switch (reportId) {
     case "sales_summary": {
       if (!viewerUserId) throw new Error("Missing viewer context for sales summary.");
-      const { data, error } = await supabase.rpc("get_scope_order_metrics", {
-        _viewer_user_id: viewerUserId,
-        _from_iso: fromIso!,
-        _to_iso: toIso!,
-      });
-      if (error) throw asReportError(error);
-      const metrics = (data?.[0] ?? {}) as {
-        orders_count?: number;
-        customers_count?: number;
-        revenue?: number;
-        avg_order_value?: number;
-      };
+      const [bd, fin] = await Promise.all([
+        fetchShopifyBreakdown(viewerUserId, fromIso!, toIso!),
+        fetchFinancialBreakdown(viewerUserId, fromIso!, toIso!),
+      ]);
+      const orders = Number(bd.orders_in_scope ?? 0);
+      const totalSales = Number(bd.total_sales_check ?? 0);
+      const aov = orders > 0 ? (totalSales / orders).toFixed(2) : "0.00";
       return {
         columns: ["Metric", "Value"],
         rows: [
-          ["Orders", Number(metrics.orders_count || 0)],
-          ["Customers", Number(metrics.customers_count || 0)],
-          ["Gross revenue (order total)", Number(metrics.revenue || 0).toFixed(2)],
-          ["Average order value", Number(metrics.avg_order_value || 0).toFixed(2)],
+          ["Gross sales", Number(bd.gross_sales_line_list ?? 0).toFixed(2)],
+          ["Discounts", Number(bd.discounts ?? 0).toFixed(2)],
+          ["Returns", Number(bd.returns_refunded ?? 0).toFixed(2)],
+          ["Net sales", Number(bd.net_sales_derived ?? 0).toFixed(2)],
+          ["Shipping", Number(bd.shipping ?? 0).toFixed(2)],
+          ["Return fees", Number(bd.return_fees ?? 0).toFixed(2)],
+          ["Taxes", Number(bd.taxes ?? 0).toFixed(2)],
+          ["Total sales", totalSales.toFixed(2)],
+          ["Orders (sales event day)", orders],
+          ["Paid orders", Number(fin.orders_paid_count ?? 0)],
+          ["Pending orders", Number(fin.orders_pending_count ?? 0)],
+          ["Refunded orders", Number(fin.orders_refunded_count ?? 0)],
+          ["Customers", Number(fin.customers_count ?? 0)],
+          ["Average order value", aov],
+          ["Missing fact days / orders", Number(bd.orders_missing_reporting ?? 0)],
+          ["Attribution", SHOPIFY_REPORT_ATTRIBUTION_NOTE],
           ["Display currency", currency],
         ],
       };
@@ -278,13 +336,17 @@ export async function fetchReportData(
           "Order",
           "Customer",
           "Email",
-          "Total",
-          "Subtotal",
+          "Reporting day (Dubai)",
+          "Created at",
+          "Total sales (analytics est.)",
+          "Gross lines",
+          "Discounts",
+          "Shipping",
           "Tax",
+          "Order total (CRM)",
           "Currency",
           "Payment",
           "Fulfillment",
-          "Date",
           "Test",
         ],
         rows: orders.map((o) => {
@@ -293,13 +355,17 @@ export async function fetchReportData(
             String(r.order_number ?? ""),
             String(r.customer_name ?? ""),
             String(r.email ?? ""),
+            orderReportingDayYmd(r.shopify_created_at),
+            String(r.shopify_created_at ?? ""),
+            orderAnalyticsTotalEstimate(r),
+            Number(r.reporting_line_items_gross ?? r.subtotal ?? 0),
+            Number(r.reporting_total_discounts ?? 0),
+            Number(r.reporting_total_shipping ?? 0),
+            Number(r.total_tax ?? 0),
             Number(r.total || 0),
-            Number(r.subtotal || 0),
-            Number(r.total_tax || 0),
             String(r.currency_code ?? currency),
             String(r.financial_status ?? ""),
             String(r.fulfillment_status ?? ""),
-            String(r.shopify_created_at ?? ""),
             r.test_order ? "Yes" : "No",
           ];
         }),
@@ -315,6 +381,7 @@ export async function fetchReportData(
         const price = Number(row.price || 0);
         lines.push([
           String(row.order_number ?? ""),
+          orderReportingDayYmd(row.shopify_created_at),
           String(row.shopify_created_at ?? ""),
           String(row.product ?? ""),
           String(row.variant ?? ""),
@@ -326,7 +393,18 @@ export async function fetchReportData(
         ]);
       }
       return {
-        columns: ["Order", "Order date", "Product", "Variant", "SKU", "Qty", "Unit price", "Line revenue", "Currency"],
+        columns: [
+          "Order",
+          "Reporting day (Dubai)",
+          "Created at",
+          "Product",
+          "Variant",
+          "SKU",
+          "Qty",
+          "Unit price",
+          "Line revenue",
+          "Currency",
+        ],
         rows: lines,
       };
     }
@@ -341,7 +419,7 @@ export async function fetchReportData(
       if (error) throw asReportError(error);
       const rows = (data ?? []) as Array<{ product_name?: string | null; units_sold?: number | null; revenue?: number | null }>;
       return {
-        columns: ["Product", "Units sold", "Revenue"],
+        columns: ["Product", "Units sold", "Line revenue"],
         rows: rows.map((row) => [
           String(row.product_name ?? "Item"),
           Number(row.units_sold ?? 0),
@@ -365,7 +443,7 @@ export async function fetchReportData(
         revenue?: number | null;
       }>;
       return {
-        columns: ["Customer", "Email", "Orders", "Revenue"],
+        columns: ["Customer", "Email", "Orders", "Total sales (Shopify)"],
         rows: rows.map((row) => [
           String(row.customer_label ?? "Guest"),
           String(row.customer_email ?? ""),
@@ -385,7 +463,7 @@ export async function fetchReportData(
       if (error) throw asReportError(error);
       const rows = (data ?? []) as Array<{ payment_status?: string | null; orders_count?: number | null; revenue?: number | null }>;
       return {
-        columns: ["Payment status", "Orders", "Revenue"],
+        columns: ["Payment status", "Orders", "Total sales (Shopify)"],
         rows: rows.map((row) => [
           String(row.payment_status ?? "unknown"),
           Number(row.orders_count ?? 0),
@@ -408,7 +486,7 @@ export async function fetchReportData(
         revenue?: number | null;
       }>;
       return {
-        columns: ["Fulfillment", "Orders", "Revenue"],
+        columns: ["Fulfillment", "Orders", "Total sales (Shopify)"],
         rows: rows.map((row) => [
           String(row.fulfillment_status ?? "unknown"),
           Number(row.orders_count ?? 0),
@@ -419,28 +497,21 @@ export async function fetchReportData(
 
     case "tax_summary": {
       if (!viewerUserId) throw new Error("Missing viewer context for tax summary report.");
-      const { data, error } = await (supabase as any).rpc("get_analytics_tax_summary_rows", {
-        _viewer_user_id: viewerUserId,
-        _from_iso: fromIso!,
-        _to_iso: toIso!,
-      });
-      if (error) throw asReportError(error);
-      const rows = (data ?? []) as Array<{
-        breakdown?: string | null;
-        currency_code?: string | null;
-        subtotal?: number | null;
-        tax?: number | null;
-        total?: number | null;
-      }>;
+      const bd = await fetchShopifyBreakdown(viewerUserId, fromIso!, toIso!);
       return {
-        columns: ["Breakdown", "Currency code", "Subtotal", "Tax", "Total"],
-        rows: rows.map((row) => [
-          String(row.breakdown ?? ""),
-          String(row.currency_code ?? currency),
-          Number(row.subtotal ?? 0),
-          Number(row.tax ?? 0),
-          Number(row.total ?? 0),
-        ]),
+        columns: ["Component", "Amount"],
+        rows: [
+          ["Gross sales", Number(bd.gross_sales_line_list ?? 0).toFixed(2)],
+          ["Discounts", Number(bd.discounts ?? 0).toFixed(2)],
+          ["Returns", Number(bd.returns_refunded ?? 0).toFixed(2)],
+          ["Net sales", Number(bd.net_sales_derived ?? 0).toFixed(2)],
+          ["Shipping", Number(bd.shipping ?? 0).toFixed(2)],
+          ["Return fees", Number(bd.return_fees ?? 0).toFixed(2)],
+          ["Taxes", Number(bd.taxes ?? 0).toFixed(2)],
+          ["Total sales", Number(bd.total_sales_check ?? 0).toFixed(2)],
+          ["Attribution", SHOPIFY_REPORT_ATTRIBUTION_NOTE],
+          ["Display currency", currency],
+        ],
       };
     }
 
@@ -454,7 +525,7 @@ export async function fetchReportData(
       if (error) throw asReportError(error);
       const rows = (data ?? []) as Array<{ salesperson_name?: string | null; orders_count?: number | null; revenue?: number | null }>;
       return {
-        columns: ["Salesperson", "Orders", "Revenue"],
+        columns: ["Salesperson", "Orders", "Total sales (Shopify)"],
         rows: rows.map((row) => [
           String(row.salesperson_name ?? "Unassigned"),
           Number(row.orders_count ?? 0),
@@ -572,7 +643,14 @@ export async function fetchReportData(
         team_revenue?: number | null;
       }>;
       return {
-        columns: ["Name", "Role", "Team members", "Team customers", "Team orders", "Team revenue"],
+        columns: [
+          "Name",
+          "Role",
+          "Team members",
+          "Team customers",
+          "Team orders",
+          "Team total sales (Shopify)",
+        ],
         rows: rows.map((row) => [
           String(row.viewer_name ?? ""),
           String(row.viewer_role ?? ""),

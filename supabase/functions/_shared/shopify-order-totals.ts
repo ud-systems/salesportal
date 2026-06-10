@@ -24,14 +24,22 @@ function parseAmount(amount: string | null | undefined, fallback: number): numbe
   return Number.isFinite(n) ? n : fallback;
 }
 
-export function mapShopifyOrderMoneyFields(node: ShopifyOrderPriceNode): {
+export type ShopifyOrderMoneyContext = {
+  financialStatus?: string | null;
+  reportingTotalRefunded?: number | null;
+};
+
+export function mapShopifyOrderMoneyFields(
+  node: ShopifyOrderPriceNode,
+  context?: ShopifyOrderMoneyContext,
+): {
   total: number;
   original_total: number;
   current_total: number;
 } {
   const total = parseAmount(node.totalPriceSet?.shopMoney?.amount, 0);
   const currentStr = node.currentTotalPriceSet?.shopMoney?.amount;
-  const current_total =
+  let current_total =
     currentStr != null && String(currentStr).trim() !== ""
       ? parseAmount(currentStr, 0)
       : total;
@@ -39,5 +47,14 @@ export function mapShopifyOrderMoneyFields(node: ShopifyOrderPriceNode): {
   const fromOriginalApi =
     origStr != null && String(origStr).trim() !== "" ? parseAmount(origStr, 0) : null;
   const original_total = Math.max(total, current_total, fromOriginalApi ?? 0);
+
+  const status = String(context?.financialStatus || "").toLowerCase();
+  const refunded = Number(context?.reportingTotalRefunded ?? 0);
+  const isPending = status === "pending" || status === "authorized";
+  const hasRefundSignal = refunded > 0 || status === "refunded" || status === "partially_refunded";
+  if (isPending && !hasRefundSignal && current_total < total) {
+    current_total = total;
+  }
+
   return { total, original_total, current_total };
 }

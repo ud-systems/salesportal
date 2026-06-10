@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Users, ShoppingCart } from "lucide-react";
-import { KpiCard } from "@/components/KpiCard";
-import { RetailFinancialKpiSection } from "@/components/RetailFinancialKpiSection";
-import { ShopifySalesBreakdownSection } from "@/components/ShopifySalesBreakdownSection";
+import { Users } from "lucide-react";
+import { DashboardOverviewSummaryCard } from "@/components/DashboardOverviewSummaryCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useManagerSelectedSalespeopleTimeseries,
   useManagerTeamMemberOptions,
   useSalespersonFinancialBreakdown,
-  useScopeFinancialBreakdown,
   useScopeOrderTimeseries,
-  useScopeShopifySalesBreakdown,
-  useSelectedSalespeopleShopifySalesBreakdown,
-  emptyScopeShopifySalesBreakdown,
+  useShopifyAnalyticsDashboard,
+  useSelectedSalespeopleShopifyAnalyticsDashboard,
+  shopifyAnalyticsToSalesBreakdown,
+  emptyShopifyAnalyticsDashboard,
   useSalespeopleScopedMetricsAndSeries,
 } from "@/hooks/use-shopify-data";
 import { useShopDisplayCurrency } from "@/hooks/use-display-currency";
@@ -92,11 +90,11 @@ export default function ManagerDashboardPage() {
     "manager",
     Boolean(user?.id),
   );
-  const { data: allMetrics, isLoading: loadingAllMetrics } = useScopeFinancialBreakdown(
+  const { data: teamAnalytics, isLoading: loadingTeamAnalytics } = useShopifyAnalyticsDashboard(
     user?.id,
     fromIso,
     toIso,
-    Boolean(user?.id),
+    Boolean(user?.id) && scopeMode === "team",
   );
   const { data: allSeries = [], isLoading: loadingAllSeries } = useScopeOrderTimeseries(
     user?.id,
@@ -148,35 +146,31 @@ export default function ManagerDashboardPage() {
     Boolean(user?.id),
   );
 
-  const metrics = scopeMode === "team" ? allMetrics : scopedData;
-  const series = scopeMode === "team" ? allSeries : (selectedSeries.length ? selectedSeries : scopedData?.series ?? []);
-  const loadingMetrics = scopeMode === "team" ? loadingAllMetrics : loadingScopedData || loadingSelectedSeries;
-  const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
-
-  const { data: shopifyLayer2Team, isLoading: loadingShopifyLayer2Team } = useScopeShopifySalesBreakdown(
-    user?.id,
-    fromIso,
-    toIso,
-    Boolean(user?.id) && scopeMode === "team",
-  );
-  const { data: shopifyLayer2Scoped, isLoading: loadingShopifyLayer2Scoped } = useSelectedSalespeopleShopifySalesBreakdown(
+  const { data: scopedAnalytics, isLoading: loadingScopedAnalytics } = useSelectedSalespeopleShopifyAnalyticsDashboard(
     user?.id,
     scopedSalespersonIds,
     fromIso,
     toIso,
     Boolean(user?.id) && scopeMode !== "team" && scopedSalespersonIds.length > 0,
   );
+  const analytics =
+    scopeMode === "team"
+      ? teamAnalytics
+      : scopedSalespersonIds.length > 0
+        ? scopedAnalytics
+        : emptyShopifyAnalyticsDashboard();
   const shopifySalesBreakdown = useMemo(
-    () =>
-      scopeMode === "team"
-        ? shopifyLayer2Team
-        : scopedSalespersonIds.length > 0
-          ? shopifyLayer2Scoped
-          : emptyScopeShopifySalesBreakdown(),
-    [scopeMode, scopedSalespersonIds.length, shopifyLayer2Team, shopifyLayer2Scoped],
+    () => shopifyAnalyticsToSalesBreakdown(analytics ?? emptyShopifyAnalyticsDashboard()),
+    [analytics],
   );
-  const loadingShopifySalesBreakdown =
-    scopeMode === "team" ? loadingShopifyLayer2Team : scopedSalespersonIds.length > 0 ? loadingShopifyLayer2Scoped : false;
+  const series = scopeMode === "team" ? allSeries : (selectedSeries.length ? selectedSeries : scopedData?.series ?? []);
+  const loadingAnalytics =
+    scopeMode === "team"
+      ? loadingTeamAnalytics
+      : scopedSalespersonIds.length > 0
+        ? loadingScopedAnalytics
+        : false;
+  const loadingSeries = scopeMode === "team" ? loadingAllSeries : loadingSelectedSeries;
 
   type BreakdownRow = {
     salesperson_user_id: string;
@@ -365,28 +359,31 @@ export default function ManagerDashboardPage() {
       {compareEnabled && scopeMode !== "team" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Selected scope current gross</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(metrics?.current_gross_sales || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Selected scope total sales</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(analytics?.total_sales || 0, null, currency)}</p>
           </div>
           <div className="card-float p-4">
-            <p className="text-xs text-muted-foreground font-body">Full team current gross</p>
-            <p className="text-xl font-heading font-bold">{formatOrderMoney(allMetrics?.current_gross_sales || 0, null, currency)}</p>
+            <p className="text-xs text-muted-foreground font-body">Full team total sales</p>
+            <p className="text-xl font-heading font-bold">{formatOrderMoney(teamAnalytics?.total_sales || 0, null, currency)}</p>
           </div>
         </div>
       )}
 
-      <div className="space-y-3">
-        <RetailFinancialKpiSection metrics={metrics} loading={loadingMetrics} currency={currency} delayBase={50} />
-        <ShopifySalesBreakdownSection
-          breakdown={shopifySalesBreakdown}
-          loading={loadingShopifySalesBreakdown}
-          currency={currency}
-          delayBase={110}
-        />
-        <div className="grid grid-cols-1 sm:max-w-xs">
-          <KpiCard title="Total Orders" value={loadingMetrics ? <Skeleton className="h-8 w-16 rounded-md" /> : String(metrics?.orders_total_count || 0)} icon={ShoppingCart} info="All in-scope orders across all financial statuses." delay={200} />
-        </div>
-      </div>
+      <DashboardOverviewSummaryCard
+        currency={currency}
+        delayBase={50}
+        salesBreakdown={shopifySalesBreakdown}
+        loadingSales={loadingAnalytics}
+        totalOrders={analytics?.orders_total ?? 0}
+        paidOrders={analytics?.orders_paid ?? 0}
+        pendingOrders={analytics?.orders_pending ?? 0}
+        refundedOrders={analytics?.orders_refunded ?? 0}
+        unfulfilledOrders={analytics?.orders_unfulfilled ?? 0}
+        loadingOrders={loadingAnalytics}
+        loadingUnfulfilled={loadingAnalytics}
+        totalCustomers={analytics?.customers_count ?? 0}
+        loadingCustomers={loadingAnalytics}
+      />
 
       <div className="card-float p-5 opacity-0 animate-fade-in min-w-0">
         <h3 className="font-heading font-semibold text-foreground mb-4">{trendTitle}</h3>
@@ -402,7 +399,7 @@ export default function ManagerDashboardPage() {
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip
-                  formatter={(v: number) => [formatOrderMoney(v, null, currency), "Current gross sales"]}
+                  formatter={(v: number) => [formatOrderMoney(v, null, currency), "Total sales"]}
                 />
                 <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} />
               </BarChart>
@@ -428,11 +425,10 @@ export default function ManagerDashboardPage() {
                   <th className="text-left py-2.5 font-medium">Salesperson</th>
                   <th className="text-right py-2.5 font-medium">Registered Customers</th>
                   <th className="text-right py-2.5 font-medium">Orders</th>
-                  <th className="text-right py-2.5 font-medium">Original gross</th>
-                  <th className="text-right py-2.5 font-medium">Current gross</th>
-                  <th className="text-right py-2.5 font-medium">Net ex VAT</th>
-                  <th className="text-right py-2.5 font-medium">VAT</th>
-                  <th className="text-right py-2.5 font-medium">Refunded / returned</th>
+                  <th className="text-right py-2.5 font-medium">Total sales</th>
+                  <th className="text-right py-2.5 font-medium">Net sales</th>
+                  <th className="text-right py-2.5 font-medium">Taxes</th>
+                  <th className="text-right py-2.5 font-medium">Returns</th>
                 </tr>
               </thead>
               <tbody>
@@ -441,7 +437,6 @@ export default function ManagerDashboardPage() {
                     <td className="py-3">{row.salesperson_name}</td>
                     <td className="py-3 text-right">{row.customers_count}</td>
                     <td className="py-3 text-right">{row.orders_total_count}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(row.original_gross_sales, null, currency)}</td>
                     <td className="py-3 text-right">{formatOrderMoney(row.current_gross_sales, null, currency)}</td>
                     <td className="py-3 text-right">{formatOrderMoney(row.net_sales_ex_vat, null, currency)}</td>
                     <td className="py-3 text-right">{formatOrderMoney(row.vat_collected, null, currency)}</td>
@@ -453,7 +448,6 @@ export default function ManagerDashboardPage() {
                     <td className="py-3">Total</td>
                     <td className="py-3 text-right">{breakdownTotals.customers_count}</td>
                     <td className="py-3 text-right">{breakdownTotals.orders_total_count}</td>
-                    <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.original_gross_sales, null, currency)}</td>
                     <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.current_gross_sales, null, currency)}</td>
                     <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.net_sales_ex_vat, null, currency)}</td>
                     <td className="py-3 text-right">{formatOrderMoney(breakdownTotals.vat_collected, null, currency)}</td>

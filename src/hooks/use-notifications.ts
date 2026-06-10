@@ -52,10 +52,24 @@ export function useMarkNotificationsRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (ids: string[]) => {
-      if (!ids.length) return;
+      if (!ids.length) return 0;
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc("mark_user_notifications_read", { _ids: ids });
+      if (!rpcError) {
+        const updated = typeof rpcData === "number" ? rpcData : 0;
+        if (updated === 0) throw new Error("No notifications were marked as read");
+        return updated;
+      }
+
       const now = new Date().toISOString();
-      const { error } = await supabase.from("user_notifications").update({ read_at: now }).in("id", ids);
+      const { data, error } = await supabase
+        .from("user_notifications")
+        .update({ read_at: now })
+        .in("id", ids)
+        .select("id");
       if (error) throw error;
+      if (!data?.length) throw new Error("No notifications were marked as read");
+      return data.length;
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["user-notifications-unread"] });

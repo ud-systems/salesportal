@@ -10,6 +10,7 @@
  *   node scripts/trigger-shopify-sync.mjs --module orders --reset-orders-checkpoint
  *   node scripts/trigger-shopify-sync.mjs --refresh-order-ids 123,456
  *   node scripts/trigger-shopify-sync.mjs --refresh-auto-stale-refunded
+ *   node scripts/trigger-shopify-sync.mjs --module analytics --days-back 90
  *
  * Defaults VITE_SUPABASE_URL from ../.env if present.
  */
@@ -48,6 +49,7 @@ function argValue(name, def) {
 }
 
 const moduleArg = argValue("--module", "");
+const daysBackArg = argValue("--days-back", "");
 const resetOrders = argFlag("--reset-orders-checkpoint");
 const resetCustomers = argFlag("--reset-customer-checkpoint");
 const refreshOrderIdsArg = argValue("--refresh-order-ids", "");
@@ -74,8 +76,11 @@ const refreshIds = refreshOrderIdsArg
       .filter(Boolean)
   : [];
 
+const daysBack = daysBackArg ? Number(daysBackArg) : undefined;
+
 const body = {
   ...(moduleArg ? { module: moduleArg } : {}),
+  ...(Number.isFinite(daysBack) && daysBack > 0 ? { days_back: daysBack } : {}),
   ...(resetOrders ? { reset_orders_checkpoint: true } : {}),
   ...(resetCustomers ? { reset_customer_checkpoint: true } : {}),
   ...(refreshIds.length ? { refresh_shopify_order_ids: refreshIds } : {}),
