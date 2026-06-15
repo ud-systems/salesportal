@@ -526,7 +526,7 @@ BEGIN
       ),
       explicit_scope AS (
         SELECT c.id AS customer_id, c.shopify_customer_id FROM public.shopify_customers c
-        WHERE c.id = ANY(coalesce($13, ARRAY[]::uuid[]))
+        WHERE c.id = ANY(coalesce($12, ARRAY[]::uuid[]))
       ),
       scoped_customers AS (
         SELECT DISTINCT c.id AS customer_id, c.shopify_customer_id FROM public.shopify_customers c
@@ -546,13 +546,13 @@ BEGIN
       ),
       filtered AS (
         SELECT o.* FROM public.shopify_orders o
-        WHERE (NOT coalesce($12, true) OR EXISTS (SELECT 1 FROM candidate_orders co WHERE co.id = o.id))
+        WHERE (NOT coalesce($11, true) OR EXISTS (SELECT 1 FROM candidate_orders co WHERE co.id = o.id))
           AND (coalesce(trim($4), '') = '' OR coalesce(o.order_number::text, '') ILIKE ('%%' || replace(replace(trim($4), '%%', ''), '_', '') || '%%')
             OR coalesce(o.customer_name, '') ILIKE ('%%' || replace(replace(trim($4), '%%', ''), '_', '') || '%%'))
           AND (coalesce($5, 'all') = 'all' OR o.financial_status = $5)
           AND (coalesce($6, 'all') = 'all' OR o.fulfillment_status = $6)
           AND (
-            CASE WHEN coalesce($14, false) THEN
+            CASE WHEN coalesce($13, false) THEN
               public.shopify_order_reporting_day_in_period(o.shopify_created_at, $7, $8)
             ELSE
               ($7 IS NULL OR o.shopify_created_at >= $7) AND ($8 IS NULL OR o.shopify_created_at < $8)

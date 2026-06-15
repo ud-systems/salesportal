@@ -2423,8 +2423,22 @@ export function useOrdersPaginated(params: OrdersQueryParams) {
           _page_size: pageSize,
           _force_scoped_filter: true,
           _customer_ids: scopedCustomerIdsFinal,
+          _filter_by_reporting_day: false,
         });
-        if (scopedError) throw scopedError;
+        if (scopedError) {
+          devError("useOrdersPaginated scoped RPC failed", {
+            message: scopedError.message,
+            details: (scopedError as { details?: string }).details,
+            hint: (scopedError as { hint?: string }).hint,
+            code: (scopedError as { code?: string }).code,
+            viewerUserId,
+            scopedSalespeopleFinal,
+            scopedOwnerNamesFinal,
+            fromIso,
+            toIso,
+          });
+          throw scopedError;
+        }
         const rows = (scopedRows ?? []) as { row_data: any; total_count: number | null }[];
         return {
           data: rows.map((r) => r.row_data).filter(Boolean),
