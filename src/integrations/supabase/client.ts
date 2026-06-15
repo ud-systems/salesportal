@@ -46,5 +46,22 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   }
 });
 
+// Clear stale sessions when refresh fails (avoids repeated 400 Invalid Refresh Token noise).
+supabase.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_OUT") {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { refresh_token?: string | null } | null;
+      const refreshToken = parsed?.refresh_token;
+      if (refreshToken === null || refreshToken === undefined || refreshToken === "") {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }
+});
+
 // Do not call refreshSession() at module load: it races with autoRefreshToken and other
 // getSession/refresh callers, which triggers Navigator Lock timeouts in @supabase/gotrue-js.

@@ -207,7 +207,7 @@ AS $$
     coalesce(sum(coalesce(oi.quantity, 0) * coalesce(oi.price, 0)), 0)::numeric(14,2)
   FROM public.shopify_order_items oi
   INNER JOIN scoped_orders so ON so.id = oi.order_id
-  GROUP BY 1 ORDER BY revenue DESC, product_name ASC;
+  GROUP BY 1 ORDER BY 3 DESC, 1 ASC;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_analytics_top_customers(
@@ -262,7 +262,7 @@ AS $$
     CASE WHEN so.email IS NOT NULL AND btrim(so.email) <> '' THEN 'em:' || lower(trim(so.email)) END,
     CASE WHEN so.customer_name IS NOT NULL AND btrim(so.customer_name) <> '' THEN 'nm:' || btrim(so.customer_name) END,
     'guest:no-detail')
-  ORDER BY revenue DESC, customer_label ASC;
+  ORDER BY 4 DESC, 1 ASC;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_analytics_payment_status_breakdown(
@@ -306,7 +306,7 @@ AS $$
   )
   SELECT financial_status::text, count(*)::bigint,
     coalesce(sum(public.shopify_order_analytics_total_sales(so.id)), 0)::numeric(14,2)
-  FROM scoped_orders so GROUP BY financial_status ORDER BY revenue DESC, payment_status ASC;
+  FROM scoped_orders so GROUP BY financial_status ORDER BY 3 DESC, 1 ASC;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_analytics_fulfillment_status_breakdown(
@@ -350,7 +350,7 @@ AS $$
   )
   SELECT fulfillment_status::text, count(*)::bigint,
     coalesce(sum(public.shopify_order_analytics_total_sales(so.id)), 0)::numeric(14,2)
-  FROM scoped_orders so GROUP BY fulfillment_status ORDER BY revenue DESC, fulfillment_status ASC;
+  FROM scoped_orders so GROUP BY fulfillment_status ORDER BY 3 DESC, 1 ASC;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_analytics_sales_by_salesperson(
@@ -403,7 +403,7 @@ AS $$
   )
   SELECT oa.salesperson_name, count(DISTINCT oa.order_id)::bigint,
     coalesce(sum(public.shopify_order_analytics_total_sales(oa.order_id)), 0)::numeric(14,2)
-  FROM order_attribution oa GROUP BY oa.salesperson_name ORDER BY revenue DESC, oa.salesperson_name ASC;
+  FROM order_attribution oa GROUP BY oa.salesperson_name ORDER BY 3 DESC, 1 ASC;
 $$;
 
 -- Scoped list RPCs: optional reporting-day period filter (reports); default created-at (Orders page).
