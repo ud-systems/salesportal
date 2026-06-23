@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useRegisterSW } from "virtual:pwa-register/react";
+import { devError } from "@/lib/dev-logger";
 
 /**
  * Registers the production service worker and prompts when a new build is available.
@@ -12,7 +13,7 @@ export function PwaUpdateNotifier() {
     updateServiceWorker,
   } = useRegisterSW({
     onRegisterError(err) {
-      console.error("Service worker registration failed", err);
+      devError("Service worker registration failed", err);
     },
   });
 

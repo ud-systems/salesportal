@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import { resolveCapabilities, type AppCapability } from "@/lib/auth-capabilities";
+import { purgeCorruptAuthStorageIfSignedOut } from "@/lib/purge-auth-storage";
 
 export type UserRole = "admin" | "owner" | "supervisor" | "manager" | "salesperson";
 
@@ -122,47 +123,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    const handleInvalidRefreshToken = async (message: string) => {
-      if (!/Invalid Refresh Token|Refresh Token Not Found/i.test(message)) return;
-      // Clear only local auth state, avoid noisy retry loops with stale tokens.
-      await supabase.auth.signOut({ scope: "local" });
-      if (cancelled) return;
-      setUser(null);
-      setPasswordRecoveryActive(false);
-      setLoading(false);
-    };
-
     // Set up auth state listener FIRST. Never await PostgREST / other Supabase calls
     // synchronously inside this callback — it can deadlock gotrue-js and leave getSession()
     // pending forever (spinner until a full reload). Defer hydration to the next task.
+    // INITIAL_SESSION from this subscription replaces a separate getSession() on mount,
+    // which previously raced for the auth lock and triggered gotrue-js lock warnings.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "PASSWORD_RECOVERY") {
         setPasswordRecoveryActive(true);
       }
       if (event === "SIGNED_OUT") {
         setPasswordRecoveryActive(false);
+        purgeCorruptAuthStorageIfSignedOut();
       }
       setTimeout(() => {
         if (cancelled) return;
         void applySession(session as { user: User } | null, true);
       }, 0);
     });
-
-    // Then check existing session
-    supabase.auth
-      .getSession()
-      .then(async ({ data: { session }, error }) => {
-        if (cancelled) return;
-        if (error) {
-          await handleInvalidRefreshToken(error.message);
-          return;
-        }
-        await applySession(session as { user: User } | null, true);
-      })
-      .catch(async (err) => {
-        if (cancelled) return;
-        await handleInvalidRefreshToken(err instanceof Error ? err.message : String(err));
-      });
 
     return () => {
       cancelled = true;

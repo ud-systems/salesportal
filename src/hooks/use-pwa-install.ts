@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { devError } from "@/lib/dev-logger";
 
 /**
  * Chrome/Edge install prompt event. Not in lib.dom yet, so we type it locally.
@@ -80,7 +81,7 @@ export function usePwaInstall() {
       setDeferred(null);
       return choice.outcome;
     } catch (err) {
-      console.error("PWA install prompt failed", err);
+      devError("PWA install prompt failed", err);
       setDeferred(null);
       return "unavailable";
     }
