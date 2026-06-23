@@ -9,6 +9,13 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Same-origin Supabase proxy — browser only sees /api/db/*, not *.supabase.co in DevTools.
+[[redirects]]
+  from = "/api/db/*"
+  to = "https://xbmpndatdanjewhwxzxr.supabase.co/:splat"
+  status = 200
+  force = true
+
 # Client-side routing: serve index.html for all non-file paths so React Router
 # handles /dashboard, /login, deep links, and refreshes on nested routes.
 [[redirects]]

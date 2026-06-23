@@ -33,6 +33,18 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      (function () {
+        var host = location.hostname;
+        if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") return;
+        var noop = function () {};
+        ["log", "debug", "info", "warn", "error", "trace", "group", "groupCollapsed", "groupEnd"].forEach(function (m) {
+          try {
+            console[m] = noop;
+          } catch (e) {}
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

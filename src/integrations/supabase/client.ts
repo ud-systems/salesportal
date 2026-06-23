@@ -2,10 +2,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { processLock } from '@supabase/auth-js';
 import type { Database } from './types';
+import { getSupabaseAuthStorageKey, getSupabaseBrowserUrl } from '@/lib/supabase-url';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = getSupabaseBrowserUrl();
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const STORAGE_KEY = `sb-${new URL(SUPABASE_URL).hostname.split(".")[0]}-auth-token`;
+const STORAGE_KEY = getSupabaseAuthStorageKey();
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
@@ -44,10 +45,20 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    debug: false,
     // In-tab process lock avoids Navigator LockManager steal warnings from
     // concurrent getSession/refresh during React mount (see gotrue-js locks.ts).
     lock: processLock,
-  }
+  },
+  realtime: {
+    // Avoid noisy reconnect loops when the tab is in the background.
+    params: { eventsPerSecond: 2 },
+  },
+  global: {
+    headers: {
+      "X-Client-Info": "uddash-crm",
+    },
+  },
 });
 
 // Do not call refreshSession() at module load: it races with autoRefreshToken and other

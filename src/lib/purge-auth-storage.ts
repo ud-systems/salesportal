@@ -1,4 +1,6 @@
-const STORAGE_KEY = `sb-${new URL(import.meta.env.VITE_SUPABASE_URL).hostname.split(".")[0]}-auth-token`;
+import { getSupabaseAuthStorageKey } from "@/lib/supabase-url";
+
+const STORAGE_KEY = getSupabaseAuthStorageKey();
 
 /** Remove corrupt or empty auth blobs after sign-out (avoids refresh-token retry loops). */
 export function purgeCorruptAuthStorageIfSignedOut() {

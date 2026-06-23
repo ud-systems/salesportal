@@ -40,27 +40,46 @@ export function NotificationBell({ className }: { className?: string }) {
   useEffect(() => {
     if (!user?.id || !user.hasDbRole) return;
 
-    const channel = supabase
-      .channel(`user-notifications-live-${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "user_notifications",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          const row = payload.new as UserNotificationRow;
-          void qc.invalidateQueries({ queryKey: ["user-notifications-unread"] });
-          void qc.invalidateQueries({ queryKey: ["user-notifications-recent"] });
-          toastForNotification(row);
-        },
-      )
-      .subscribe();
+    let cancelled = false;
+    let channel: ReturnType<typeof supabase.channel> | undefined;
+
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (cancelled || !session?.access_token) return;
+
+      await supabase.realtime.setAuth(session.access_token);
+      if (cancelled) return;
+
+      channel = supabase
+        .channel(`user-notifications-live-${user.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "user_notifications",
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            const row = payload.new as UserNotificationRow;
+            void qc.invalidateQueries({ queryKey: ["user-notifications-unread"] });
+            void qc.invalidateQueries({ queryKey: ["user-notifications-recent"] });
+            toastForNotification(row);
+          },
+        )
+        .subscribe();
+
+      if (cancelled && channel) {
+        void supabase.removeChannel(channel);
+        channel = undefined;
+      }
+    })();
 
     return () => {
-      void supabase.removeChannel(channel);
+      cancelled = true;
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [user?.id, user?.hasDbRole, qc]);
 

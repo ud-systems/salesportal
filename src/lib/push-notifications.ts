@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getSupabaseBrowserUrl } from "@/lib/supabase-url";
 
 const PUSH_CONFIG_CACHE_KEY = "uddash_push_vapid_public_key";
 
@@ -49,7 +50,7 @@ export async function fetchVapidPublicKey(): Promise<string | null> {
   const cached = sessionStorage.getItem(PUSH_CONFIG_CACHE_KEY);
   if (cached) return cached;
 
-  const base = import.meta.env.VITE_SUPABASE_URL;
+  const base = getSupabaseBrowserUrl();
   if (!base) return null;
 
   try {

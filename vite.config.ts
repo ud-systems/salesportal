@@ -13,6 +13,15 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      "/api/db": {
+        target: "https://xbmpndatdanjewhwxzxr.supabase.co",
+        changeOrigin: true,
+        secure: true,
+        ws: true,
+        rewrite: (path) => path.replace(/^\/api\/db/, ""),
+      },
+    },
   },
   // Recharts peer-depends on react-is; forcing pre-bundle avoids dev "Failed to resolve import react-is"
   // when optimizing `.vite/deps/recharts.js`.
@@ -104,17 +113,13 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        importScripts: ["/push-sw-handler.js"],
+        importScripts: ["/workbox-silent.js", "/push-sw-handler.js"],
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/sw\.js$/, /^\/workbox.*\.js$/],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/[\w-]+\.supabase\.co\/.*/i,
-            handler: "NetworkOnly",
-          },
-          {
-            urlPattern: /^https:\/\/[\w-]+\.supabase\.in\/.*/i,
+            urlPattern: /^\/api\/db\/.*/i,
             handler: "NetworkOnly",
           },
         ],
