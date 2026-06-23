@@ -17,8 +17,9 @@ import {
   stripReferralPrefix,
 } from "../_shared/salesperson-match.ts";
 import { mapShopifyOrderMoneyFields } from "../_shared/shopify-order-totals.ts";
+import { extractOrderReportingFields, parseOrderSubtotalFromNode } from "../_shared/shopify-order-reporting.ts";
+import { mapGraphqlLineItemEdgesToPayload } from "../_shared/shopify-order-line-items.ts";
 import { SHOPIFY_ORDER_DETAIL_GQL, upsertShopifyOrderFromGraphqlNode } from "../_shared/shopify-order-graphql-upsert.ts";
-import { extractOrderReportingFields } from "../_shared/shopify-order-reporting.ts";
 import { recordRefundDeltaIfIncreased } from "../_shared/shopify-order-refund-delta.ts";
 import { syncShopifyAnalyticsOrderFacts } from "../_shared/shopify-analytics-facts-sync.ts";
 
@@ -747,8 +748,10 @@ Deno.serve(async (req) => {
               processedAt
               displayFinancialStatus
               displayFulfillmentStatus
+              edited
               taxesIncluded
               subtotalPriceSet { shopMoney { amount } }
+              currentSubtotalPriceSet { shopMoney { amount } }
               currentTotalTaxSet { shopMoney { amount } }
               totalPriceSet { shopMoney { amount currencyCode } }
               originalTotalPriceSet { shopMoney { amount } }
@@ -776,6 +779,7 @@ Deno.serve(async (req) => {
                     title
                     variantTitle
                     quantity
+                    currentQuantity
                     sku
                     variant { id sku }
                     originalUnitPriceSet { shopMoney { amount } }
@@ -866,6 +870,7 @@ Deno.serve(async (req) => {
         const money = mapShopifyOrderMoneyFields(o, {
           financialStatus: o.displayFinancialStatus,
           reportingTotalRefunded: rep.reporting_total_refunded,
+          orderEdited: Boolean(o.edited),
         });
         const fulfillmentNodes = (o.fulfillments || []) as Array<{
           id?: string;
@@ -924,7 +929,7 @@ Deno.serve(async (req) => {
           original_total: money.original_total,
           current_total: money.current_total,
           currency_code: o.currencyCode || o.totalPriceSet?.shopMoney?.currencyCode || null,
-          subtotal: parseFloat(o.subtotalPriceSet?.shopMoney?.amount || "0") || null,
+          subtotal: parseOrderSubtotalFromNode(o as Record<string, unknown>),
           total_tax: parseFloat(o.currentTotalTaxSet?.shopMoney?.amount || "0") || null,
           financial_status: (o.displayFinancialStatus || "PENDING").toLowerCase(),
           fulfillment_status: (o.displayFulfillmentStatus || "UNFULFILLED").toLowerCase(),
@@ -949,30 +954,7 @@ Deno.serve(async (req) => {
         if (isNewOrder) newOrdersPayload.push(row);
         else updateOrdersPayload.push(row);
 
-        const lineItems = (o.lineItems?.edges || []).map((e: {
-          node: {
-            id: string;
-            title: string;
-            variantTitle: string;
-            quantity: number;
-            sku: string | null;
-            variant: { id: string; sku: string | null } | null;
-            originalUnitPriceSet: { shopMoney: { amount: string } };
-          };
-        }) => {
-          const n = e.node;
-          const variantGid = n.variant?.id || null;
-          const lineGid = n.id?.replace("gid://shopify/LineItem/", "") || null;
-          return {
-            shopify_line_item_id: lineGid,
-            shopify_variant_gid: variantGid,
-            product: n.title,
-            variant: n.variantTitle || "Default",
-            sku: n.variant?.sku || n.sku || null,
-            quantity: n.quantity,
-            price: parseFloat(n.originalUnitPriceSet?.shopMoney?.amount || "0"),
-          };
-        });
+        const lineItems = mapGraphqlLineItemEdgesToPayload(o.lineItems?.edges);
         lineItemsByShopifyOrderId.set(shopifyOrderId, lineItems);
         fulfillmentsByShopifyOrderId.set(shopifyOrderId, flattenedFulfillments);
       }

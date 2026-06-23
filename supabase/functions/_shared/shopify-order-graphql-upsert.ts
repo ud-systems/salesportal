@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { mapShopifyOrderMoneyFields, type ShopifyOrderPriceNode } from "./shopify-order-totals.ts";
-import { extractOrderReportingFields } from "./shopify-order-reporting.ts";
+import { extractOrderReportingFields, parseOrderSubtotalFromNode } from "./shopify-order-reporting.ts";
 import { recordRefundDeltaIfIncreased } from "./shopify-order-refund-delta.ts";
+import { mapGraphqlLineItemEdgesToRows } from "./shopify-order-line-items.ts";
 
 /** Admin GraphQL: single order with money + line items (same shape as shopify-webhook). */
 export const SHOPIFY_ORDER_DETAIL_GQL = `query($id: ID!) {
@@ -17,8 +18,10 @@ export const SHOPIFY_ORDER_DETAIL_GQL = `query($id: ID!) {
     processedAt
     displayFinancialStatus
     displayFulfillmentStatus
+    edited
     taxesIncluded
     subtotalPriceSet { shopMoney { amount } }
+    currentSubtotalPriceSet { shopMoney { amount } }
     currentTotalTaxSet { shopMoney { amount } }
     totalPriceSet { shopMoney { amount currencyCode } }
     originalTotalPriceSet { shopMoney { amount } }
@@ -56,6 +59,7 @@ export const SHOPIFY_ORDER_DETAIL_GQL = `query($id: ID!) {
           title
           variantTitle
           quantity
+          currentQuantity
           sku
           variant { id sku }
           originalUnitPriceSet { shopMoney { amount } }
@@ -240,6 +244,7 @@ export async function upsertShopifyOrderFromGraphqlNode(
   const money = mapShopifyOrderMoneyFields(o as unknown as ShopifyOrderPriceNode, {
     financialStatus: o.displayFinancialStatus as string | undefined,
     reportingTotalRefunded: rep.reporting_total_refunded,
+    orderEdited: Boolean(o.edited),
   });
   const shipping = extractShippingFields(o);
   const fulfillmentRows = extractFulfillmentRows(o, null);
@@ -262,10 +267,7 @@ export async function upsertShopifyOrderFromGraphqlNode(
         currency_code: (o.currencyCode as string | null) ||
           (o as { totalPriceSet?: { shopMoney?: { currencyCode?: string } } }).totalPriceSet?.shopMoney?.currencyCode ||
           null,
-        subtotal: parseFloat(
-          String((o as { subtotalPriceSet?: { shopMoney?: { amount?: string } } }).subtotalPriceSet?.shopMoney?.amount ||
-            "0"),
-        ) || null,
+        subtotal: parseOrderSubtotalFromNode(o),
         total_tax: parseFloat(
           String((o as { currentTotalTaxSet?: { shopMoney?: { amount?: string } } }).currentTotalTaxSet?.shopMoney?.amount ||
             "0"),
@@ -319,28 +321,9 @@ export async function upsertShopifyOrderFromGraphqlNode(
   }
 
   await supabase.from("shopify_order_items").delete().eq("order_id", orderId);
-  const lineItems = ((o as { lineItems?: { edges?: { node: Record<string, unknown> }[] } }).lineItems?.edges || []).map(
-    (e: { node: Record<string, unknown> }) => {
-      const n = e.node as {
-        id?: string;
-        title?: string;
-        variantTitle?: string;
-        quantity?: number;
-        sku?: string | null;
-        variant?: { id?: string; sku?: string | null } | null;
-        originalUnitPriceSet?: { shopMoney?: { amount?: string } };
-      };
-      return {
-        order_id: orderId,
-        shopify_line_item_id: n.id ? String(n.id).replace("gid://shopify/LineItem/", "") : null,
-        shopify_variant_gid: n.variant?.id || null,
-        product: n.title || null,
-        variant: n.variantTitle || "Default",
-        sku: n.variant?.sku || n.sku || null,
-        quantity: n.quantity || 0,
-        price: parseFloat(n.originalUnitPriceSet?.shopMoney?.amount || "0"),
-      };
-    },
+  const lineItems = mapGraphqlLineItemEdgesToRows(
+    (o as { lineItems?: { edges?: { node: Record<string, unknown> }[] } }).lineItems?.edges,
+    orderId,
   );
   if (lineItems.length > 0) {
     const { error: liErr } = await supabase.from("shopify_order_items").insert(lineItems);

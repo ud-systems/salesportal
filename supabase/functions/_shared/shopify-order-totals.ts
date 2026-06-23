@@ -27,6 +27,8 @@ function parseAmount(amount: string | null | undefined, fallback: number): numbe
 export type ShopifyOrderMoneyContext = {
   financialStatus?: string | null;
   reportingTotalRefunded?: number | null;
+  /** When true, order edits legitimately reduce current_total below totalPriceSet — do not clamp. */
+  orderEdited?: boolean | null;
 };
 
 export function mapShopifyOrderMoneyFields(
@@ -52,7 +54,7 @@ export function mapShopifyOrderMoneyFields(
   const refunded = Number(context?.reportingTotalRefunded ?? 0);
   const isPending = status === "pending" || status === "authorized";
   const hasRefundSignal = refunded > 0 || status === "refunded" || status === "partially_refunded";
-  if (isPending && !hasRefundSignal && current_total < total) {
+  if (isPending && !hasRefundSignal && !context?.orderEdited && current_total < total) {
     current_total = total;
   }
 
