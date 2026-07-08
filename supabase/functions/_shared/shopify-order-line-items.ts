@@ -1,4 +1,9 @@
-/** Map Shopify Admin GraphQL line items, excluding removed/refunded units (currentQuantity = 0). */
+/**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ *
+ * Map Shopify Admin GraphQL line items, excluding removed/refunded units (currentQuantity = 0).
+ */
 
 export type GraphqlLineItemNode = {
   id?: string;

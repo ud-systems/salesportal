@@ -2,6 +2,8 @@
 
 **Vendor:** DataPulseFlow — [DataPulseFlow.com](https://datapulseflow.com)  
 
+In this repository, this folder is the **canonical vendor package**. The live deployment lives in `../supabase/`; the application UI lives in `../src/`. See `../docs/ARCHITECTURE.md` for the full system map.
+
 ```
 DataPulseFlow-integration-kit/
 ├── README.md

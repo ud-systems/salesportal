@@ -1,3 +1,9 @@
+/**
+ * Shopify data hooks — client of the DataPulseFlow platform.
+ * All commerce tables (`shopify_*`) are populated by DataPulseFlow Edge Functions.
+ * Manual sync invokes `shopify-sync` and requires an active DataPulseFlow license.
+ * @see docs/ARCHITECTURE.md
+ */
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { getAccessTokenForEdgeFunctions } from "@/lib/supabase-edge-auth";

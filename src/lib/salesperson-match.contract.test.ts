@@ -9,6 +9,7 @@ import {
   labelsMatchShopifyToRole,
   metafieldValueForKeysOrdered,
   REFERRED_BY_METAFIELD_KEYS_ORDERED,
+  SP_ASSIGNED_METAFIELD_KEYS_ORDERED,
 } from "../../supabase/functions/_shared/salesperson-match.ts";
 
 const team = [
@@ -54,5 +55,13 @@ describe("salesperson-match (Shopify ↔ app)", () => {
 
   it("strips Referred by: prefix for matching", () => {
     expect(labelsMatchShopifyToRole("Referred by: Rob Lister", "Rob Lister")).toBe(true);
+  });
+
+  it("reads custom.salesperson_assigned (Shopify admin label SP_Assigned)", () => {
+    const mets = [
+      { namespace: "custom", key: "referredby", value: "Anas M" },
+      { namespace: "custom", key: "salesperson_assigned", value: "Reece Morgan" },
+    ];
+    expect(metafieldValueForKeysOrdered(mets, SP_ASSIGNED_METAFIELD_KEYS_ORDERED)).toBe("Reece Morgan");
   });
 });

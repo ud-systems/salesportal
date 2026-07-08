@@ -1,4 +1,7 @@
 /**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ *
  * Normalizes Shopify Admin GraphQL Order price sets into CRM columns.
  *
  * `originalTotalPriceSet` is usually the pre-return order ceiling, but Shopify can return

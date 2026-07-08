@@ -4,9 +4,23 @@
 **Vendor:** DataPulseFlow  
 **Domain:** [DataPulseFlow.com](https://datapulseflow.com)  
 
+This package is the **vendor source-of-truth** for the DataPulseFlow Shopify data platform. In this repository, it is deployed and extended under `supabase/` and consumed by the React application under `src/`. See the root [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for how the layers fit together.
+
 This package contains the **server-side integration layer** that enables a Supabase-backed application—structured like the reference implementation—to **sync and ingest Shopify data** via **Admin GraphQL**, **webhooks**, **checkpoints**, and **optional scheduled reconciliation**.
 
 It is **not** a drop-in for arbitrary stacks. It requires **Supabase** (Postgres + Edge Functions) and a **Shopify custom app** with appropriate Admin API scopes.
+
+---
+
+## Relationship to this repository
+
+| Path | Role |
+|------|------|
+| `DataPulseFlow-integration-kit/` (this folder) | Canonical vendor deliverable — migrations, Edge Functions, deployment docs, license terms |
+| `supabase/` (repo root) | **Deployed instance** of this kit plus app-specific extensions (analytics fact sync, push, admin utilities) |
+| `src/` (repo root) | Application UI — dashboards, settings, license validation; client of DataPulseFlow-populated data |
+
+Assessors: the application **cannot operate on live Shopify data** without the components defined in this kit (deployed to `supabase/`) and an active DataPulseFlow license.
 
 ---
 

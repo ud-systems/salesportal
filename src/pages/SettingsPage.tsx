@@ -414,6 +414,7 @@ export default function SettingsPage() {
             <div>
               <CardTitle className="text-lg">DataPulse License Code</CardTitle>
               <CardDescription>
+                Required to unlock DataPulseFlow sync and webhook ingestion for this application.
                 Growth/Pro codes are renewable every 30 days. Enterprise code validates as lifetime.
               </CardDescription>
             </div>

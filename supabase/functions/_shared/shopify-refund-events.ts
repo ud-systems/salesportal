@@ -1,3 +1,7 @@
+/**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 function refundAmountFromJson(refund: Record<string, unknown>): number {

@@ -17,6 +17,9 @@ dist-ssr
 # Supabase CLI local cache (machine-specific)
 supabase/.temp/
 
+# Remote Shopify data exports (PII — local only)
+data/shopify-export/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

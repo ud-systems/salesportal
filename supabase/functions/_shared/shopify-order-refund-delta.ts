@@ -1,3 +1,7 @@
+/**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ */
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 /** Record incremental refund when totalRefundedSet increases (Shopify refund-date analytics). */

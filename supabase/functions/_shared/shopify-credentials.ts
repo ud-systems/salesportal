@@ -1,4 +1,9 @@
-/** Must match Shopify Admin GraphQL version used across edge functions. */
+/**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ *
+ * Must match Shopify Admin GraphQL version used across edge functions.
+ */
 export const SHOPIFY_ADMIN_API_VERSION = "2025-01";
 
 /** e.g. `https://shop.myshopify.com/path` → `shop.myshopify.com` */

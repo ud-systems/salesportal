@@ -1,4 +1,9 @@
-/** Shopify Order reporting fields for Analytics-style breakdown (Layer 2). */
+/**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ *
+ * Shopify Order reporting fields for Analytics-style breakdown (Layer 2).
+ */
 
 import { activeLineItemQuantity, type GraphqlLineItemNode } from "./shopify-order-line-items.ts";
 

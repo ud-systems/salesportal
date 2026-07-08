@@ -1,3 +1,8 @@
+/**
+ * DataPulseFlow Shopify Connection Test
+ * Licensed component — https://datapulseflow.com
+ * Part of the DataPulseFlow Shopify integration layer.
+ */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { corsHeaders } from "../_shared/cors.ts";
 import { requireAdmin } from "../_shared/require-admin.ts";

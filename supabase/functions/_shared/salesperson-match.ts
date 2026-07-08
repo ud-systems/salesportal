@@ -1,4 +1,7 @@
 /**
+ * DataPulseFlow — shared Shopify ingestion module
+ * Licensed component — https://datapulseflow.com
+ *
  * Match Shopify customer metafield labels (SP / referred-by) to `user_roles.salesperson_name`.
  *
  * Designed for Shopify choice-list values (e.g. `custom.referredby`) matching Settings → Salespersons
@@ -18,6 +21,9 @@ export const REFERRED_BY_METAFIELD_KEYS_ORDERED = [
 
 /** SP metafield keys — `custom.*` first to align with Shopify customer metafield definitions. */
 export const SP_ASSIGNED_METAFIELD_KEYS_ORDERED = [
+  // UD store: admin label "SP_Assigned" → API key `custom.salesperson_assigned`
+  "custom.salesperson_assigned",
+  "salesperson_assigned",
   "custom.sp_assigned",
   "custom.sp_assigned_customer",
   "custom.salesperson",

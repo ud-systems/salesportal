@@ -1,3 +1,5 @@
+-- DataPulseFlow license settings (required for sync and webhook ingestion)
+-- https://datapulseflow.com — see docs/OPERATIONS.md
 INSERT INTO public.app_settings (key, value)
 VALUES
   ('datapulse_access_code', ''),

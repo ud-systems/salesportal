@@ -1,5 +1,7 @@
 project_id = "xbmpndatdanjewhwxzxr"
 
+# DataPulseFlow Shopify integration — Edge Functions (https://datapulseflow.com)
+# shopify-webhook, shopify-sync, and shopify-test are licensed ingestion components.
 # Gateway JWT verification can return 401 before our handler runs (browser then shows a CORS error).
 # Deploy with: supabase functions deploy <name> --no-verify-jwt --project-ref <ref>
 # Auth + admin are enforced inside each function via requireAdmin() + auth.getUser().

@@ -1,3 +1,8 @@
+/**
+ * DataPulseFlow Shopify Sync Engine
+ * Licensed component — https://datapulseflow.com
+ * Required for all Shopify → Postgres ingestion in this application.
+ */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { corsHeaders } from "../_shared/cors.ts";
 import { requireAdmin } from "../_shared/require-admin.ts";
