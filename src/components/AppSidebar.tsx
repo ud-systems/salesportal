@@ -41,9 +41,8 @@ const oversightNav: ({ title: string; url: string; icon: typeof LayoutDashboard;
   { title: "Salespersons", url: "/salespersons", icon: UserCheck, capability: "view_salespersons_page" },
   { title: "Sync Logs", url: "/sync-logs", icon: RefreshCw, capability: "view_sync_logs" },
   { title: "Webhook Monitor", url: "/webhook-monitor", icon: RadioTower, capability: "view_webhook_monitor" },
+  { title: "Settings", url: "/settings", icon: Settings, capability: "manage_settings" },
 ];
-
-const settingsNav = { title: "Settings", url: "/settings", icon: Settings };
 
 export function AppSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -51,16 +50,11 @@ export function AppSidebar() {
   const [hasNavOverflow, setHasNavOverflow] = useState(false);
   const { user, logout, hasCapability } = useAuth();
   const navigate = useNavigate();
-  const isSalespersonOrManager = user?.role === "salesperson" || user?.role === "manager";
-  const showSettings = hasCapability("manage_settings") && !isSalespersonOrManager;
-  const navItems = [
-    ...(hasCapability("view_org_dashboard")
-      ? oversightNav.filter((item) => !item.capability || hasCapability(item.capability))
-      : hasCapability("view_salespersons_page")
-        ? [...salespersonNav, { title: "Salespersons", url: "/salespersons", icon: UserCheck }]
-        : salespersonNav),
-    ...(showSettings ? [settingsNav] : []),
-  ];
+  const navItems = hasCapability("view_org_dashboard")
+    ? oversightNav.filter((item) => !item.capability || hasCapability(item.capability))
+    : hasCapability("view_salespersons_page")
+      ? [...salespersonNav, { title: "Salespersons", url: "/salespersons", icon: UserCheck }]
+      : salespersonNav;
   const navRef = useRef<HTMLElement | null>(null);
 
   const updateNavScrollState = useCallback(() => {
